@@ -35,6 +35,7 @@ pub struct DinoRuntime {
 pub fn init_from_config() -> Option<Arc<DinoRuntime>> {
     let dino = &CONFIG.dino;
     if !dino.enabled {
+        tracing::info!("dino shadow mode OFF (dino.enabled = false)");
         return None;
     }
 

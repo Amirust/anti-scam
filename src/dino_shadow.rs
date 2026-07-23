@@ -49,6 +49,8 @@ async fn try_shadow_pass(
     hash_verdict: &'static str,
 ) -> Result<(), crate::Error> {
     let Some(guild_id) = message.guild_id else {
+        // observations are per-guild rows and cards need an admin channel
+        tracing::info!("message {} is not in a guild, dino shadow skipped", message.id);
         return Ok(());
     };
 
