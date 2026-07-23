@@ -1,8 +1,12 @@
 use poise::serenity_prelude as serenity;
 use crate::{Context, Error};
 
-#[poise::command(slash_command, subcommands("set_notification_channel"))]
-pub async fn settings(ctx: Context<'_>, ) -> Result<(), Error> {
+#[poise::command(
+    slash_command,
+    subcommands("set_notification_channel"),
+    default_member_permissions = "ADMINISTRATOR"
+)]
+pub async fn settings(ctx: Context<'_>) -> Result<(), Error> {
     ctx.say("How?").await?;
     Ok(())
 }
