@@ -5,7 +5,7 @@ use serenity::all::{CreateAttachment, CreateMessage};
 use crate::dataset::Dataset;
 use crate::detection::Verdict;
 use crate::images as images_utils;
-use crate::{db, detection, interactions, Data, Error, InflightSet};
+use crate::{db, detection, dino_shadow, interactions, Data, Error, InflightSet};
 use crate::embeds::{
     describe_reason, get_ban_dm_embed, get_ban_server_embed, get_cannot_ban_embed,
     get_review_embed,
@@ -42,7 +42,7 @@ pub async fn handle_event(
         serenity::FullEvent::InteractionCreate {
             interaction: serenity::Interaction::Component(component),
         } => {
-            interactions::handle_component(ctx, component, &framework.options().owners).await
+            interactions::handle_component(ctx, component, &framework.options().owners, data).await
         }
         serenity::FullEvent::InteractionCreate {
             interaction: serenity::Interaction::Modal(modal),
@@ -195,6 +195,7 @@ async fn scan_message(
         let inflight = Arc::clone(&data.inflight);
         let scam_db = Arc::clone(&data.scam_db);
         let settings_db = Arc::clone(&data.db);
+        let dino = data.dino.clone();
         let ctx = ctx.clone();
         let message = message.clone();
         let filename = target.filename.clone();
@@ -204,11 +205,26 @@ async fn scan_message(
                 // the guard stays alive until the verdict is fully handled, so
                 // repeated copies of the image stay deduplicated during the ban
                 Ok(Some((verdict, bytes, _guard))) => {
-                    let handled =
-                        handle_verdict(&ctx, &message, &settings_db, verdict, bytes, &filename)
-                            .await;
+                    let hash_verdict = dino_shadow::verdict_tag(&verdict);
+                    let handled = handle_verdict(
+                        &ctx,
+                        &message,
+                        &settings_db,
+                        verdict,
+                        bytes.clone(),
+                        &filename,
+                    )
+                    .await;
                     if let Err(e) = handled {
                         tracing::warn!("verdict handling failed for message {}: {e}", message.id);
+                    }
+
+                    // shadow mode observes every image, still under the guard
+                    if let Some(runtime) = dino {
+                        dino_shadow::shadow_pass(
+                            &ctx, &message, &settings_db, runtime, bytes, &filename, hash_verdict,
+                        )
+                        .await;
                     }
                 }
                 // same image already in flight, that task owns the verdict

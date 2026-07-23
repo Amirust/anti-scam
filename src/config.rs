@@ -19,6 +19,7 @@ pub fn init() {
 pub struct AppConfig {
     pub detection: DetectionConfig,
     pub cache: CacheConfig,
+    pub dino: DinoConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +50,33 @@ impl Default for DetectionConfig {
             min_informative_tiles: 6,
             hard_match_percent: 75,
             review_percent: 60,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DinoConfig {
+    /// shadow mode: embeddings are computed and logged for every scanned
+    /// image, similar-but-not-hash-matched images go to the admin channel for
+    /// labeling; no ban is ever issued from this stage
+    pub enabled: bool,
+    /// ONNX file of the DINOv2-S image encoder (see README for the download)
+    pub model_path: String,
+    /// embedding dataset produced by `anti-scam dino-export`
+    pub dataset_path: String,
+    /// min cosine similarity against the dataset to post a shadow-review
+    /// report; uncalibrated until enough labeled observations are collected
+    pub review_threshold: f32,
+}
+
+impl Default for DinoConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model_path: "./dinov2s.onnx".to_string(),
+            dataset_path: "./dino.json".to_string(),
+            review_threshold: 0.6,
         }
     }
 }
@@ -107,5 +135,9 @@ fn validate(config: &AppConfig) {
         detection.review_percent <= detection.hard_match_percent,
         "detection.review_percent must not exceed detection.hard_match_percent, \
          otherwise the review band is empty"
+    );
+    assert!(
+        config.dino.review_threshold > 0.0 && config.dino.review_threshold <= 1.0,
+        "dino.review_threshold must be within (0, 1]"
     );
 }

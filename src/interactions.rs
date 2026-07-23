@@ -13,6 +13,9 @@ use crate::{Data, Error};
 const BAN_BUTTON_PREFIX: &str = "ban:";
 /// custom_id of the ban button after it has been used (never matches the parser)
 const BAN_DONE_ID: &str = "ban:done";
+const DINO_LABEL_PREFIX: &str = "dinolbl:";
+/// custom_id of a labeling card after it has been labeled (never matches the parser)
+const DINO_DONE_ID: &str = "dinolbl:done";
 const ADD_TO_DATASET_ID: &str = "dataset:add";
 const DATASET_MODAL_ID: &str = "dataset:modal";
 const DATASET_NAME_INPUT_ID: &str = "dataset:name";
@@ -45,28 +48,101 @@ fn add_to_dataset_button() -> CreateButton {
         .style(ButtonStyle::Secondary)
 }
 
+/// moderator labels a shadow-mode similarity match; the observation id is the
+/// only state, so cards survive restarts like every other button
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DinoLabel {
+    /// scam the hashing pipeline missed
+    TruePositive,
+    /// unrelated image, plain false alarm
+    FalsePositive,
+    /// legitimate content that genuinely resembles the scam (the valuable ones)
+    HardNegative,
+}
+
+impl DinoLabel {
+    const ALL: [DinoLabel; 3] =
+        [DinoLabel::TruePositive, DinoLabel::FalsePositive, DinoLabel::HardNegative];
+
+    /// stable identifier used in custom_ids and the sqlite `label` column
+    fn as_db_str(self) -> &'static str {
+        match self {
+            DinoLabel::TruePositive => "true_positive",
+            DinoLabel::FalsePositive => "false_positive",
+            DinoLabel::HardNegative => "hard_negative",
+        }
+    }
+
+    fn from_db_str(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|label| label.as_db_str() == s)
+    }
+
+    fn button_label(self) -> &'static str {
+        match self {
+            DinoLabel::TruePositive => "✅ Scam (hash missed it)",
+            DinoLabel::FalsePositive => "❌ Not a scam",
+            DinoLabel::HardNegative => "⚠️ Legit but similar",
+        }
+    }
+
+    fn button_style(self) -> ButtonStyle {
+        match self {
+            DinoLabel::TruePositive => ButtonStyle::Danger,
+            DinoLabel::FalsePositive => ButtonStyle::Secondary,
+            DinoLabel::HardNegative => ButtonStyle::Primary,
+        }
+    }
+}
+
+pub fn dino_label_buttons(observation_id: i64) -> Vec<CreateActionRow> {
+    let buttons = DinoLabel::ALL
+        .into_iter()
+        .map(|label| {
+            CreateButton::new(format!("{DINO_LABEL_PREFIX}{}:{observation_id}", label.as_db_str()))
+                .label(label.button_label())
+                .style(label.button_style())
+        })
+        .collect();
+
+    vec![CreateActionRow::Buttons(buttons)]
+}
+
 pub async fn handle_component(
     ctx: &serenity::Context,
     interaction: &ComponentInteraction,
     owners: &HashSet<UserId>,
+    data: &Data,
 ) -> Result<(), Error> {
     match parse_custom_id(&interaction.data.custom_id) {
         Some(Action::Ban { user_id, posted_at }) => {
             handle_ban_button(ctx, interaction, user_id, posted_at).await
         }
         Some(Action::AddToDataset) => handle_dataset_button(ctx, interaction, owners).await,
+        Some(Action::LabelDino { observation_id, label }) => {
+            handle_dino_label_button(ctx, interaction, data, observation_id, label).await
+        }
         None => Ok(()),
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Action {
     Ban { user_id: UserId, posted_at: i64 },
     AddToDataset,
+    LabelDino { observation_id: i64, label: DinoLabel },
 }
 
 fn parse_custom_id(id: &str) -> Option<Action> {
     if id == ADD_TO_DATASET_ID {
         return Some(Action::AddToDataset);
+    }
+
+    if let Some(rest) = id.strip_prefix(DINO_LABEL_PREFIX) {
+        let (label, observation) = rest.split_once(':')?;
+        return Some(Action::LabelDino {
+            observation_id: observation.parse().ok().filter(|&id| id > 0)?,
+            label: DinoLabel::from_db_str(label)?,
+        });
     }
 
     let rest = id.strip_prefix(BAN_BUTTON_PREFIX)?;
@@ -148,6 +224,66 @@ async fn handle_ban_button(
             &ctx.http,
             CreateInteractionResponse::UpdateMessage(
                 CreateInteractionResponseMessage::new().components(used_row),
+            ),
+        )
+        .await?;
+
+    Ok(())
+}
+
+/// record the moderator's verdict on a shadow-mode card; first label wins,
+/// the card's buttons collapse into a disabled summary button
+async fn handle_dino_label_button(
+    ctx: &serenity::Context,
+    interaction: &ComponentInteraction,
+    data: &Data,
+    observation_id: i64,
+    label: DinoLabel,
+) -> Result<(), Error> {
+    if interaction.guild_id.is_none() {
+        return respond_ephemeral(ctx, interaction, "This button only works in a server.").await;
+    }
+
+    let presser_can_moderate = interaction
+        .member
+        .as_ref()
+        .and_then(|member| member.permissions)
+        .is_some_and(|permissions| permissions.ban_members());
+    if !presser_can_moderate {
+        return respond_ephemeral(
+            ctx,
+            interaction,
+            "You need the Ban Members permission to label shadow matches.",
+        )
+        .await;
+    }
+
+    let labeled = data
+        .db
+        .set_dino_label(observation_id, label.as_db_str(), &interaction.user.id.to_string())
+        .await?;
+    if !labeled {
+        return respond_ephemeral(ctx, interaction, "This match was already labeled.").await;
+    }
+
+    tracing::info!(
+        "dino observation {observation_id} labeled {} by {}",
+        label.as_db_str(),
+        interaction.user.id
+    );
+
+    let done_row = vec![CreateActionRow::Buttons(vec![
+        CreateButton::new(DINO_DONE_ID)
+            .label(format!("{} — by {}", label.button_label(), interaction.user.name))
+            .style(label.button_style())
+            .disabled(true),
+    ])];
+
+    interaction
+        .create_response(
+            &ctx.http,
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new().components(done_row),
             ),
         )
         .await?;
@@ -313,4 +449,35 @@ fn ephemeral_message(text: &str) -> CreateInteractionResponse {
             .content(text)
             .ephemeral(true),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_dino_label_custom_id() {
+        let action = parse_custom_id("dinolbl:hard_negative:42");
+
+        assert_eq!(
+            action,
+            Some(Action::LabelDino { observation_id: 42, label: DinoLabel::HardNegative })
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_dino_label() {
+        assert_eq!(parse_custom_id("dinolbl:banhammer:42"), None);
+    }
+
+    #[test]
+    fn rejects_non_positive_observation_id() {
+        assert_eq!(parse_custom_id("dinolbl:true_positive:0"), None);
+        assert_eq!(parse_custom_id("dinolbl:true_positive:-5"), None);
+    }
+
+    #[test]
+    fn used_card_id_never_parses() {
+        assert_eq!(parse_custom_id(DINO_DONE_ID), None);
+    }
 }

@@ -15,6 +15,17 @@ pub struct Database {
     channel_cache: ChannelCache,
 }
 
+/// one shadow-mode measurement, written for every scanned image
+pub struct DinoObservation {
+    pub guild_id: String,
+    pub channel_id: String,
+    pub message_id: String,
+    pub author_id: String,
+    pub entry_name: String,
+    pub similarity: f64,
+    pub hash_verdict: &'static str,
+}
+
 impl Database {
     pub async fn new() -> Result<Self, sqlx::Error> {
         let pool = sqlx::SqlitePool::connect_with(
@@ -85,5 +96,50 @@ impl Database {
             .put(guild_id.to_string(), Some(notification_channel_id.to_string()));
 
         Ok(())
+    }
+
+    pub async fn insert_dino_observation(
+        &self,
+        observation: &DinoObservation,
+    ) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query(
+            "
+                INSERT INTO dino_observations
+                    (guild_id, channel_id, message_id, author_id,
+                     entry_name, similarity, hash_verdict)
+                VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&observation.guild_id)
+        .bind(&observation.channel_id)
+        .bind(&observation.message_id)
+        .bind(&observation.author_id)
+        .bind(&observation.entry_name)
+        .bind(observation.similarity)
+        .bind(observation.hash_verdict)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// first label wins: returns false when the observation is unknown or
+    /// already labeled (two moderators racing on the same card)
+    pub async fn set_dino_label(
+        &self,
+        observation_id: i64,
+        label: &str,
+        labeled_by: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let result = sqlx::query(
+            "UPDATE dino_observations SET label = ?, labeled_by = ?
+             WHERE id = ? AND label IS NULL",
+        )
+        .bind(label)
+        .bind(labeled_by)
+        .bind(observation_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
     }
 }

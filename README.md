@@ -124,6 +124,56 @@ appended to the local `banned.json` and picked up on the fly — no restart
 needed. Images that already hard-match an existing entry are rejected as
 duplicates, and entry names must be unique.
 
+## DINOv2 shadow mode (experimental)
+
+Perceptual hashes catch re-encodes of a known image but cannot bridge
+different crops, scales or re-rendered variants of the same scam template.
+The embedding stage is meant to close that gap: every image is encoded with
+DINOv2-S into a 384-dim vector and compared by cosine similarity against
+embeddings of the known scam set.
+
+It runs in **shadow mode**: it never bans, never deletes, and does not affect
+the hash pipeline verdict. It exists to collect calibration data first:
+
+- Every scanned image gets a row in sqlite (`dino_observations`): best-matching
+  dataset entry, cosine similarity, and what the hash pipeline said
+  (`ban`/`review`/`clean`). Rows for clean traffic build the negative
+  similarity distribution the threshold needs; rows for hash-confirmed bans are
+  free positive samples.
+- When the hash pipeline says clean but the similarity exceeds
+  `dino.review_threshold`, a labeling card is posted to the admin channel:
+  **✅ Scam (hash missed it)** / **❌ Not a scam** / **⚠️ Legit but similar**
+  (a hard negative — the valuable ones). Labeling requires the Ban Members
+  permission; the first label wins and is stored with the observation.
+
+Setup:
+
+```sh
+# 1. the encoder (Xenova/dinov2-small ONNX export, ~85 MB, fp32)
+curl -L -o dinov2s.onnx \
+  https://huggingface.co/Xenova/dinov2-small/resolve/main/onnx/model.onnx
+
+# 2. reference embeddings from your scam image folder (recursive)
+anti-scam dino-export ./images [dino.json]
+
+# 3. enable in config.toml
+#    [dino]
+#    enabled = true
+```
+
+Calibration without live traffic: `anti-scam dino-classify <folder>
+[dino.json]` scores every image in a folder against the dataset and prints a
+TSV (best + second-best match) with a summary on stderr. Variants of a known
+template typically land at 0.7–1.0, the same image at ~1.0; genuinely
+different layouts score lower and should become their own dataset entries,
+same as in the hash pipeline.
+
+Notes: the embedding dataset is bound to its own pipeline version and is
+**not** hot-reloaded — after `dino-export` restart the bot. Entries added from
+Discord land in `banned.json` only; re-run `dino-export` to refresh the
+embedding side. With `dino.enabled` and no dataset file the bot starts with
+shadow mode off (warning in the log); a broken model or dataset fails startup.
+
 ## Setup
 
 Requirements: Rust (edition 2024).
@@ -163,6 +213,10 @@ docker compose up -d --build
 into the container as a directory — entries added via the **Add to dataset**
 button land in the host file. The sqlite database persists in `./data`.
 
+For shadow mode, put `dinov2s.onnx` and `dino.json` into `./config` too and
+point `dino.model_path` / `dino.dataset_path` in `config.toml` at
+`/config/...`.
+
 ## Configuration
 
 Optional. The bot reads `config.toml` from the working directory (override
@@ -177,6 +231,10 @@ defaults. The file is read once at startup.
 | `detection.hard_match_percent` | 75 | Matched-tile percentage for an auto ban |
 | `detection.review_percent` | 60 | Matched-tile percentage to escalate for review |
 | `cache.guild_settings_capacity` | 100 | Guilds kept in the settings LRU cache |
+| `dino.enabled` | `false` | Embedding shadow mode ([details](#dinov2-shadow-mode-experimental)) |
+| `dino.model_path` | `./dinov2s.onnx` | DINOv2-S ONNX encoder |
+| `dino.dataset_path` | `./dino.json` | Embedding dataset built by `dino-export` |
+| `dino.review_threshold` | 0.6 | Min cosine similarity to post a labeling card |
 
 These are matching-time thresholds only — tuning them never invalidates an
 existing `banned.json`.

@@ -83,6 +83,32 @@ pub fn get_review_embed(
         .timestamp(Timestamp::now())
 }
 
+// Get embed for a shadow-mode labeling card: informational only, no action taken
+pub fn get_dino_shadow_embed(
+    user: &User,
+    message_url: String,
+    entry_name: &str,
+    similarity: f32,
+    filename: &str,
+) -> CreateEmbed {
+    CreateEmbed::default()
+        .title("DINO shadow match (experimental)")
+        .description(format!(
+            "User <@{}> ({}) posted an image {} that the embedding stage finds \
+             similar to a known scam, but the hashing pipeline saw nothing.\n\n\
+             **Dataset entry:** `{entry_name}`\n\
+             **Cosine similarity:** {similarity:.4}\n\n\
+             No action was taken. Label the match below — the labels calibrate \
+             the similarity threshold.",
+            user.id, user.name, message_url,
+        ))
+        .color(Color::BLURPLE)
+        .image(format!("attachment://{filename}"))
+        .thumbnail(user.avatar_url().unwrap_or(user.default_avatar_url()))
+        .footer(CreateEmbedFooter::new(format!("User ID: {}", user.id)))
+        .timestamp(Timestamp::now())
+}
+
 pub fn describe_reason(reason: MatchReason) -> String {
     match reason {
         MatchReason::WholeImage { distance } => {

@@ -3,6 +3,10 @@ mod config;
 mod dataset;
 mod events;
 mod detection;
+mod dino;
+mod dino_cli;
+mod dino_dataset;
+mod dino_shadow;
 mod export;
 mod images;
 mod img_config;
@@ -29,6 +33,8 @@ struct Data {
     // banned image dataset, hot-swappable via the "Add to dataset" button
     scam_db: Arc<dataset::Dataset>,
     db: Arc<db::Database>,
+    // embedding shadow mode; `None` unless dino.enabled with a built dataset
+    dino: Option<Arc<dino::DinoRuntime>>,
 }
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
@@ -52,8 +58,11 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let args: Vec<String> = std::env::args().collect();
-    if args.get(1).is_some_and(|a| a == "export") {
-        return export::run(&args[2..]);
+    match args.get(1).map(String::as_str) {
+        Some("export") => return export::run(&args[2..]),
+        Some("dino-export") => return dino_cli::run_export(&args[2..]),
+        Some("dino-classify") => return dino_cli::run_classify(&args[2..]),
+        _ => {}
     }
 
     // fail fast on a broken config.toml instead of on the first image
@@ -61,6 +70,7 @@ async fn main() {
 
     let db = Arc::new(db::Database::new().await.expect("failed to open database"));
     let scam_db = Arc::new(dataset::Dataset::load_startup());
+    let dino = dino::init_from_config();
 
     let options = poise::FrameworkOptions {
         commands: vec![
@@ -101,6 +111,7 @@ async fn main() {
                         .build()?,
                     db,
                     scam_db,
+                    dino,
                 })
             })
         })

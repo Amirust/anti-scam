@@ -9,3 +9,8 @@ dataset
 
 data.db
 banned.json
+.DS_Store
+
+# DINO shadow mode: model + embedding dataset live next to banned.json
+*.onnx
+dino.json
