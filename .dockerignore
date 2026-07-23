@@ -1,0 +1,9 @@
+target
+data.db
+banned.json
+config.toml
+.git
+.idea
+.env
+.DS_Store
+images

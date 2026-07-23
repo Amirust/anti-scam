@@ -1,0 +1,13 @@
+services:
+  anti-scam:
+    build: .
+    restart: unless-stopped
+    environment:
+      # set in .env next to this file (see .env.example)
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?put DISCORD_TOKEN into .env}
+      BANNED_CONFIG: /config/banned.json
+      CONFIG_PATH: /config/config.toml
+    volumes:
+      - ./config:/config
+      # sqlite database (data.db) is here
+      - ./data:/data

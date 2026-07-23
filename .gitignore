@@ -1,0 +1,11 @@
+.idea
+.claude
+
+/target
+.env
+
+images
+dataset
+
+data.db
+banned.json

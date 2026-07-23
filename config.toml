@@ -1,0 +1,32 @@
+# anti-scam runtime configuration.
+# Every key is optional: missing keys (or a missing file) fall back to the defaults shown below.
+
+[detection]
+# Max Hamming distance (out of 64 bits) for the whole-image perceptual hash to count as the same image.
+# Calibrated on the reference set: re-encoded copies score 0-6, unrelated pairs 18+.
+# Default: 10
+whole_match_threshold = 10
+
+# Max Hamming distance for two tiles to count as a match.
+# After shift alignment, re-encoded copies give 0-12 per tile.
+# Default: 13
+tile_match_threshold = 13
+
+# The tile verdict is only trusted when more informative tiles than this were compared.
+# Fewer tiles = not enough signal, the image is treated as clean.
+# Default: 6
+min_informative_tiles = 6
+
+# Percentage of informative tiles that must match for a hard match (auto ban).
+# Default: 75
+hard_match_percent = 75
+
+# Percentage of informative tiles that must match to escalate the image to the admin channel for manual review.
+# Must not exceed hard_match_percent.
+# Default: 60
+review_percent = 60
+
+[cache]
+# How many guilds keep their notification-channel setting in memory (LRU).
+# Default: 100
+guild_settings_capacity = 100
