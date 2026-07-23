@@ -1,4 +1,6 @@
-FROM rust:1.90-bookworm AS builder
+# trixie, not bookworm: the prebuilt static ONNX Runtime needs glibc >= 2.38
+# and a GCC 13+ libstdc++ at link and run time
+FROM rust:1.90-trixie AS builder
 
 WORKDIR /build
 
@@ -12,10 +14,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --release && cp target/release/anti-scam /build/anti-scam
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3t64 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/anti-scam /usr/local/bin/anti-scam
