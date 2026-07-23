@@ -3,9 +3,10 @@
 
 [detection]
 # Max Hamming distance (out of 64 bits) for the whole-image perceptual hash to count as the same image.
-# Calibrated on the reference set: re-encoded copies score 0-6, unrelated pairs 18+.
-# Default: 10
-whole_match_threshold = 10
+# Calibrated on the reference set: re-encoded/distorted copies score 0-12 across
+# the stage-1 trial views (rotations + border trim), unrelated pairs 18+.
+# Default: 12
+whole_match_threshold = 12
 
 # Max Hamming distance for two tiles to count as a match.
 # Measured on the reference set: after shift alignment most tiles of re-encoded

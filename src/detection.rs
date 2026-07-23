@@ -23,13 +23,15 @@ pub async fn process_image(bytes: bytes::Bytes, db: Arc<Vec<ImageData>>) -> Resu
     tokio::task::spawn_blocking(move || classify_image(&bytes, &db)).await?
 }
 
-/// stage 1: whole-image pHash against every DB entry (survives re-encoding and small shifts),
-/// stage 2: only if stage 1 missed - shift-aligned tile matching
+/// stage 1: whole-image pHash under trial rotations and a border-trim trial
+/// against every DB entry (survives re-encoding, small shifts, slight tilts
+/// and added margins), stage 2: only if stage 1 missed - shift-aligned tile
+/// matching
 pub fn classify_image(bytes: &[u8], entries: &[ImageData]) -> Result<Verdict, Error> {
     let normalized = images::normalize_image(bytes)?;
-    let whole_hash = images::whole_image_hash(&normalized)?;
+    let whole_hashes = images::stage1_hashes(&normalized)?;
 
-    if let Some(verdict) = whole_verdict(&whole_hash, entries) {
+    if let Some(verdict) = whole_verdict(&whole_hashes, entries) {
         return Ok(verdict);
     }
 
@@ -37,10 +39,16 @@ pub fn classify_image(bytes: &[u8], entries: &[ImageData]) -> Result<Verdict, Er
     Ok(tiles_verdict(&shifted_grids, entries))
 }
 
-fn whole_verdict(hash: &[u8; images::HASH_BYTES], entries: &[ImageData]) -> Option<Verdict> {
+fn whole_verdict(hashes: &[[u8; images::HASH_BYTES]], entries: &[ImageData]) -> Option<Verdict> {
     entries
         .iter()
-        .map(|entry| (images::hamming_distance(hash, &entry.whole_hash), entry))
+        .filter_map(|entry| {
+            hashes
+                .iter()
+                .map(|hash| images::hamming_distance(hash, &entry.whole_hash))
+                .min()
+                .map(|distance| (distance, entry))
+        })
         .filter(|&(distance, _)| distance <= CONFIG.detection.whole_match_threshold)
         .min_by_key(|&(distance, _)| distance)
         .map(|(distance, entry)| Verdict::Ban {

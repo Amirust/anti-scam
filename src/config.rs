@@ -25,8 +25,8 @@ pub struct AppConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct DetectionConfig {
     /// max Hamming distance (of 64 bits) for whole-image pHash to count as the
-    /// same image; calibrated on ./images: re-encoded copies score 0-6,
-    /// unrelated pairs 18+
+    /// same image; calibrated on ./images: re-encoded/distorted copies score
+    /// 0-12 across the stage-1 trial views, unrelated pairs 18+
     pub whole_match_threshold: u32,
     /// max Hamming distance for two tiles to count as a match; aligned
     /// re-encoded copies mostly score 0-12 per tile (tails reach ~22),
@@ -44,7 +44,7 @@ pub struct DetectionConfig {
 impl Default for DetectionConfig {
     fn default() -> Self {
         Self {
-            whole_match_threshold: 10,
+            whole_match_threshold: 12,
             tile_match_threshold: 13,
             min_informative_tiles: 6,
             hard_match_percent: 75,
