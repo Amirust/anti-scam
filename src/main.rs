@@ -55,7 +55,13 @@ async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    // ort's arena warm-up chatter drowns the per-image lines; RUST_LOG overrides
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,ort=warn")),
+        )
+        .init();
 
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
