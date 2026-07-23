@@ -34,3 +34,28 @@ review_percent = 60
 # How many guilds keep their notification-channel setting in memory (LRU).
 # Default: 100
 guild_settings_capacity = 100
+
+[dino]
+# DINOv2 embedding shadow mode (experimental, see README). Observes and logs
+# only - it never bans. Requires the ONNX encoder (model_path) and an
+# embedding dataset built with `anti-scam dino-export` (dataset_path).
+# Default: false
+enabled = true
+
+# Path to the DINOv2-S ONNX encoder (Xenova/dinov2-small export, ~85 MB).
+# Default: ./dinov2s.onnx
+model_path = "./dinov2s.onnx"
+
+# Path to the embedding dataset built by `anti-scam dino-export`.
+# Default: ./dino.json
+dataset_path = "./dino.json"
+
+# Min cosine similarity against the dataset for a clean-by-hash image to get
+# a labeling card in the admin channel. Same-template variants measure
+# ~0.7-1.0, so 0.6 posts cards generously while calibrating.
+# Default: 0.6
+review_threshold = 0.6
+
+# Labeled card images are saved here as <label>/<observation_id>.<ext>.
+# Default: ./dino_captures
+captures_dir = "./dino_captures"
