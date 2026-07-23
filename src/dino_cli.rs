@@ -2,24 +2,20 @@ use std::path::{Path, PathBuf};
 
 use crate::config::CONFIG;
 use crate::dino::{Embedder, cosine_similarity};
-use crate::dino_dataset::{self, DinoEntry};
+use crate::dino_dataset::{self, DinoEntry, DinoRefs};
 use crate::{Error, images, img_config};
 
 const IMAGE_EXTENSIONS: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
 
-/// `anti-scam dino-export <images_dir> [out_file]` — embed every image under a
-/// folder (recursively) into the shadow-mode reference dataset
+/// `anti-scam dino-export <scam_dir> [out_file] [--negatives <dir>]` — embed
+/// every image under the folders (recursively) into the reference dataset
 pub fn run_export(args: &[String]) {
-    let (dir, out) = match args {
-        [dir] => (dir.as_str(), "dino.json"),
-        [dir, out] => (dir.as_str(), out.as_str()),
-        _ => {
-            eprintln!("usage: anti-scam dino-export <images_dir> [out_file]");
-            std::process::exit(2);
-        }
+    let Some((dir, out, negatives_dir)) = parse_export_args(args) else {
+        eprintln!("usage: anti-scam dino-export <scam_dir> [out_file] [--negatives <dir>]");
+        std::process::exit(2);
     };
 
-    if let Err(e) = export(dir, out) {
+    if let Err(e) = export(dir, out, negatives_dir) {
         eprintln!("dino-export failed: {e}");
         std::process::exit(1);
     }
@@ -44,11 +40,57 @@ pub fn run_classify(args: &[String]) {
     }
 }
 
-fn export(dir: &str, out: &str) -> Result<(), Error> {
-    let embedder = load_embedder()?;
-    let images = collect_images(dir)?;
+fn parse_export_args(args: &[String]) -> Option<(&str, &str, Option<&str>)> {
+    let (positional, negatives_dir) = match args.iter().position(|a| a == "--negatives") {
+        Some(index) => {
+            let negatives = args.get(index + 1)?;
+            let positional: Vec<&String> =
+                args[..index].iter().chain(&args[index + 2..]).collect();
+            (positional, Some(negatives.as_str()))
+        }
+        None => (args.iter().collect(), None),
+    };
 
-    let entries: Vec<DinoEntry> = images
+    match positional.as_slice() {
+        [dir] => Some((dir, "dino.json", negatives_dir)),
+        [dir, out] => Some((dir, out, negatives_dir)),
+        _ => None,
+    }
+}
+
+fn export(dir: &str, out: &str, negatives_dir: Option<&str>) -> Result<(), Error> {
+    let embedder = load_embedder()?;
+
+    let refs = DinoRefs {
+        scams: embed_folder(&embedder, dir)?,
+        negatives: negatives_dir
+            .map(|dir| embed_folder(&embedder, dir))
+            .transpose()?
+            .unwrap_or_default(),
+    };
+    if let Some(duplicate) = dino_dataset::first_duplicate_name(&refs) {
+        return Err(format!(
+            "entry name \"{duplicate}\" appears in both the scam and negative folders"
+        )
+        .into());
+    }
+
+    let json = dino_dataset::to_json(&refs)?;
+    std::fs::write(out, &json)?;
+
+    println!(
+        "wrote {out}: {} scam / {} negative entr(ies), embedding pipeline v{}",
+        refs.scams.len(),
+        refs.negatives.len(),
+        dino_dataset::PIPELINE_VERSION
+    );
+    println!("sha256: {}", img_config::hex_encode(&images::sha256_hash(json.as_bytes())));
+
+    Ok(())
+}
+
+fn embed_folder(embedder: &Embedder, dir: &str) -> Result<Vec<DinoEntry>, Error> {
+    collect_images(dir)?
         .iter()
         .map(|image| {
             eprintln!("embedding {}...", image.path.display());
@@ -58,32 +100,20 @@ fn export(dir: &str, out: &str) -> Result<(), Error> {
                 .map_err(|e| format!("{}: {e}", image.path.display()))?;
             Ok(DinoEntry { name: image.name.clone(), embedding })
         })
-        .collect::<Result<_, Error>>()?;
-
-    let json = dino_dataset::to_json(&entries)?;
-    std::fs::write(out, &json)?;
-
-    println!(
-        "wrote {out}: {} entr(ies), embedding pipeline v{}",
-        entries.len(),
-        dino_dataset::PIPELINE_VERSION
-    );
-    println!("sha256: {}", img_config::hex_encode(&images::sha256_hash(json.as_bytes())));
-
-    Ok(())
+        .collect()
 }
 
 fn classify(dir: &str, dataset_path: &str) -> Result<(), Error> {
     let refs = dino_dataset::load(dataset_path)
         .map_err(|e| format!("cannot load dino dataset {dataset_path}: {e}"))?;
-    if refs.is_empty() {
-        return Err(format!("dino dataset {dataset_path} has no entries").into());
+    if refs.scams.is_empty() {
+        return Err(format!("dino dataset {dataset_path} has no scam entries").into());
     }
 
     let embedder = load_embedder()?;
     let images = collect_images(dir)?;
 
-    println!("file\tbest\tbest_sim\tsecond\tsecond_sim");
+    println!("file\tbest\tbest_sim\tsecond\tsecond_sim\tbest_negative\tnegative_sim");
 
     let best_similarities: Vec<f32> = images
         .iter()
@@ -93,15 +123,19 @@ fn classify(dir: &str, dataset_path: &str) -> Result<(), Error> {
                 .embed(&bytes)
                 .map_err(|e| format!("{}: {e}", image.path.display()))?;
 
-            let ranked = ranked_matches(&embedding, &refs);
+            let ranked = ranked_matches(&embedding, &refs.scams);
             let (best_name, best_sim) = &ranked[0];
             let (second_name, second_sim) = ranked
                 .get(1)
                 .map(|(name, sim)| (name.as_str(), *sim))
                 .unwrap_or(("-", f32::NAN));
+            let (negative_name, negative_sim) = dino_dataset::best_match(&embedding, &refs.negatives)
+                .map(|(entry, sim)| (entry.name.as_str(), sim))
+                .unwrap_or(("-", f32::NAN));
 
             println!(
-                "{}\t{best_name}\t{best_sim:.4}\t{second_name}\t{second_sim:.4}",
+                "{}\t{best_name}\t{best_sim:.4}\t{second_name}\t{second_sim:.4}\
+                 \t{negative_name}\t{negative_sim:.4}",
                 image.path.display()
             );
             Ok(*best_sim)
@@ -112,7 +146,7 @@ fn classify(dir: &str, dataset_path: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// refs sorted by similarity, best first; refs are validated non-empty
+/// scam refs sorted by similarity, best first; validated non-empty
 fn ranked_matches(embedding: &[f32], refs: &[DinoEntry]) -> Vec<(String, f32)> {
     let mut ranked: Vec<(String, f32)> = refs
         .iter()
@@ -137,7 +171,7 @@ fn print_summary(similarities: &[f32]) {
 
 fn load_embedder() -> Result<Embedder, Error> {
     let path = &CONFIG.dino.model_path;
-    Embedder::load(path).map_err(|e| {
+    Embedder::load(path, CONFIG.dino.intra_threads).map_err(|e| {
         format!("cannot load dino model {path} (set dino.model_path in config.toml): {e}").into()
     })
 }
@@ -167,7 +201,7 @@ fn collect_images(dir: &str) -> Result<Vec<SourceImage>, Error> {
         })
         .collect::<Result<_, Error>>()?;
 
-    if let Some(duplicate) = first_duplicate_name(&images) {
+    if let Some(duplicate) = first_duplicate_image_name(&images) {
         return Err(format!("duplicate entry name \"{duplicate}\" in {dir}").into());
     }
     Ok(images)
@@ -198,7 +232,7 @@ fn entry_name(root: &Path, path: &Path) -> Result<String, Error> {
     Ok(name)
 }
 
-fn first_duplicate_name(images: &[SourceImage]) -> Option<&str> {
+fn first_duplicate_image_name(images: &[SourceImage]) -> Option<&str> {
     let mut seen = std::collections::HashSet::new();
     images
         .iter()

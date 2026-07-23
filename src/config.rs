@@ -68,8 +68,14 @@ pub struct DinoConfig {
     /// min cosine similarity against the dataset to post a shadow-review
     /// report; uncalibrated until enough labeled observations are collected
     pub review_threshold: f32,
-    /// labeled card images are saved here as `<label>/<observation_id>.<ext>`
-    /// — true positives feed the datasets, hard negatives become the eval set
+    /// a card is suppressed unless the best scam similarity beats the best
+    /// negative-reference similarity by at least this much
+    pub negative_margin: f32,
+    /// ONNX Runtime intra-op threads per inference; raise on machines with
+    /// cores to spare, embeddings must not starve the hashing pipeline
+    pub intra_threads: usize,
+    /// labeled card and reference images are saved here as
+    /// `<label>/<name>.<ext>` — the pixel corpus for re-exports and eval
     pub captures_dir: String,
 }
 
@@ -80,6 +86,8 @@ impl Default for DinoConfig {
             model_path: "./dinov2s.onnx".to_string(),
             dataset_path: "./dino.json".to_string(),
             review_threshold: 0.6,
+            negative_margin: 0.05,
+            intra_threads: 2,
             captures_dir: "./dino_captures".to_string(),
         }
     }
@@ -144,4 +152,9 @@ fn validate(config: &AppConfig) {
         config.dino.review_threshold > 0.0 && config.dino.review_threshold <= 1.0,
         "dino.review_threshold must be within (0, 1]"
     );
+    assert!(
+        (0.0..1.0).contains(&config.dino.negative_margin),
+        "dino.negative_margin must be within [0, 1)"
+    );
+    assert!(config.dino.intra_threads > 0, "dino.intra_threads must be greater than 0");
 }

@@ -2,6 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::detection::{self, Verdict};
 use crate::img_config::{self, ImageData};
+use crate::utils::write_atomically;
 use crate::{images, Error};
 
 /// length of the sha256 hex prefix used to name manually added entries
@@ -115,14 +116,7 @@ impl Dataset {
     }
 }
 
-fn normalize_name(name: Option<String>) -> Option<String> {
+/// shared with the dino dataset: both take optional user-supplied entry names
+pub fn normalize_name(name: Option<String>) -> Option<String> {
     name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty())
-}
-
-/// write via a temp file + rename so a crash mid-write cannot corrupt the json
-fn write_atomically(path: &str, contents: &str) -> Result<(), Error> {
-    let tmp = format!("{path}.tmp");
-    std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
 }

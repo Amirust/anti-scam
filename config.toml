@@ -56,6 +56,16 @@ dataset_path = "./dino.json"
 # Default: 0.6
 review_threshold = 0.6
 
+# A card is suppressed unless the best scam similarity beats the best
+# negative-reference similarity by at least this margin.
+# Default: 0.05
+negative_margin = 0.05
+
+# ONNX Runtime intra-op threads per inference. Raise on machines with cores
+# to spare - inference scales near-linearly up to ~8 threads for this model.
+# Default: 2
+intra_threads = 2
+
 # Labeled card images are saved here as <label>/<observation_id>.<ext>.
 # Default: ./dino_captures
 captures_dir = "./dino_captures"

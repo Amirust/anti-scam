@@ -23,6 +23,7 @@ pub struct DinoObservation {
     pub author_id: String,
     pub entry_name: String,
     pub similarity: f64,
+    pub best_negative_similarity: Option<f64>,
     pub hash_verdict: &'static str,
 }
 
@@ -106,8 +107,8 @@ impl Database {
             "
                 INSERT INTO dino_observations
                     (guild_id, channel_id, message_id, author_id,
-                     entry_name, similarity, hash_verdict)
-                VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     entry_name, similarity, best_negative_similarity, hash_verdict)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&observation.guild_id)
         .bind(&observation.channel_id)
@@ -115,6 +116,7 @@ impl Database {
         .bind(&observation.author_id)
         .bind(&observation.entry_name)
         .bind(observation.similarity)
+        .bind(observation.best_negative_similarity)
         .bind(observation.hash_verdict)
         .execute(&self.pool)
         .await?;

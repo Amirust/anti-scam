@@ -92,6 +92,16 @@ impl DinoLabel {
             DinoLabel::HardNegative => ButtonStyle::Primary,
         }
     }
+
+    /// what the labeled image becomes in the reference dataset; plain false
+    /// positives stay out — they are noise, not look-alikes
+    fn reference_kind(self) -> Option<crate::dino_dataset::RefKind> {
+        match self {
+            DinoLabel::TruePositive => Some(crate::dino_dataset::RefKind::Scam),
+            DinoLabel::HardNegative => Some(crate::dino_dataset::RefKind::Negative),
+            DinoLabel::FalsePositive => None,
+        }
+    }
 }
 
 pub fn dino_label_buttons(observation_id: i64) -> Vec<CreateActionRow> {
@@ -292,24 +302,20 @@ async fn handle_dino_label_button(
         )
         .await?;
 
-    // best-effort: a failed capture must not undo the label
+    // best-effort: a failed capture or dataset add must not undo the label
     match report_image_url(&interaction.message) {
         Some(url) => {
-            let captured = crate::dino_shadow::capture_labeled_image(
+            let processed = crate::dino_shadow::process_label(
                 &data.http,
                 &url,
+                data.dino.clone(),
                 observation_id,
                 label.as_db_str(),
+                label.reference_kind(),
             )
             .await;
-            match captured {
-                Ok(path) => tracing::info!(
-                    "dino observation {observation_id} image captured to {}",
-                    path.display()
-                ),
-                Err(e) => tracing::warn!(
-                    "failed to capture image of dino observation {observation_id}: {e}"
-                ),
+            if let Err(e) = processed {
+                tracing::warn!("post-label processing of dino observation {observation_id} failed: {e}");
             }
         }
         None => tracing::warn!(

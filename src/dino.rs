@@ -5,7 +5,7 @@ use ort::value::Tensor;
 
 use crate::Error;
 use crate::config::CONFIG;
-use crate::dino_dataset::{self, DinoEntry};
+use crate::dino_dataset::{self, DinoRefs, DinoStore};
 
 /// DINOv2-S hidden size; every stored embedding must have this length
 pub const EMBEDDING_DIM: usize = 384;
@@ -18,20 +18,15 @@ const IMAGENET_STD: [f32; CHANNELS] = [0.229, 0.224, 0.225];
 /// tensor names of the Xenova/dinov2-small ONNX export
 const INPUT_NAME: &str = "pixel_values";
 const OUTPUT_NAME: &str = "last_hidden_state";
-/// ONNX Runtime intra-op threads; embeddings are a background signal and must
-/// not starve the hashing pipeline of cores
-const INTRA_THREADS: usize = 2;
 
-/// everything the shadow mode needs at runtime: the ONNX encoder plus the
-/// reference embeddings of known scam images
 pub struct DinoRuntime {
     pub embedder: Embedder,
-    pub refs: Vec<DinoEntry>,
+    pub store: DinoStore,
 }
 
-/// build the shadow-mode runtime from `CONFIG.dino`; `None` when disabled or
-/// when there is no embedding dataset yet, a broken model/dataset is fatal
-/// (fail fast at startup, same philosophy as config.toml)
+/// build the shadow-mode runtime from `CONFIG.dino`; `None` when disabled;
+/// a missing dataset starts empty (grown from Discord), a broken model or
+/// dataset is fatal — fail fast at startup, same philosophy as config.toml
 pub fn init_from_config() -> Option<Arc<DinoRuntime>> {
     let dino = &CONFIG.dino;
     if !dino.enabled {
@@ -43,28 +38,30 @@ pub fn init_from_config() -> Option<Arc<DinoRuntime>> {
         Ok(refs) => refs,
         Err(e) if dino_dataset::is_not_found(&e) => {
             tracing::warn!(
-                "dino.enabled is set but {} does not exist, shadow mode stays OFF; \
-                 build it with `anti-scam dino-export <images_dir>`",
+                "dino dataset {} not found, starting EMPTY; build it with \
+                 `anti-scam dino-export` or add references from Discord",
                 dino.dataset_path
             );
-            return None;
+            DinoRefs::default()
         }
         Err(e) => panic!("failed to load dino dataset {}: {e}", dino.dataset_path),
     };
-    if refs.is_empty() {
-        tracing::warn!("dino dataset {} has no entries, shadow mode stays OFF", dino.dataset_path);
-        return None;
-    }
 
-    let embedder = Embedder::load(&dino.model_path)
+    let embedder = Embedder::load(&dino.model_path, dino.intra_threads)
         .unwrap_or_else(|e| panic!("failed to load dino model {}: {e}", dino.model_path));
 
     tracing::info!(
-        "dino shadow mode ON: {} reference embedding(s), review threshold {}",
-        refs.len(),
-        dino.review_threshold
+        "dino shadow mode ON: {} scam / {} negative reference(s), review threshold {}, \
+         negative margin {}",
+        refs.scams.len(),
+        refs.negatives.len(),
+        dino.review_threshold,
+        dino.negative_margin,
     );
-    Some(Arc::new(DinoRuntime { embedder, refs }))
+    Some(Arc::new(DinoRuntime {
+        embedder,
+        store: DinoStore::new(dino.dataset_path.clone(), refs),
+    }))
 }
 
 /// DINOv2-S image encoder behind ONNX Runtime; `embed` is CPU-bound and must
@@ -75,13 +72,13 @@ pub struct Embedder {
 }
 
 impl Embedder {
-    pub fn load(path: &str) -> Result<Self, Error> {
+    pub fn load(path: &str, intra_threads: usize) -> Result<Self, Error> {
         // ort builder errors carry the non-Send builder, flatten them to text
         let session = Session::builder()
             .map_err(|e| e.to_string())?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| e.to_string())?
-            .with_intra_threads(INTRA_THREADS)
+            .with_intra_threads(intra_threads)
             .map_err(|e| e.to_string())?
             .commit_from_file(path)
             .map_err(|e| e.to_string())?;

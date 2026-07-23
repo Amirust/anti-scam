@@ -87,20 +87,25 @@ pub fn get_review_embed(
 pub fn get_dino_shadow_embed(
     user: &User,
     message_url: String,
-    entry_name: &str,
-    similarity: f32,
+    shadow_match: &crate::dino_shadow::ShadowMatch,
     filename: &str,
 ) -> CreateEmbed {
+    let negative_line = shadow_match
+        .negative
+        .as_ref()
+        .map(|(name, similarity)| format!("\n**Closest negative:** `{name}` at {similarity:.4}"))
+        .unwrap_or_default();
+
     CreateEmbed::default()
         .title("DINO shadow match (experimental)")
         .description(format!(
             "User <@{}> ({}) posted an image {} that the embedding stage finds \
              similar to a known scam, but the hashing pipeline saw nothing.\n\n\
-             **Dataset entry:** `{entry_name}`\n\
-             **Cosine similarity:** {similarity:.4}\n\n\
+             **Dataset entry:** `{}`\n\
+             **Cosine similarity:** {:.4}{negative_line}\n\n\
              No action was taken. Label the match below — the labels calibrate \
-             the similarity threshold.",
-            user.id, user.name, message_url,
+             the similarity threshold and grow the reference dataset.",
+            user.id, user.name, message_url, shadow_match.entry_name, shadow_match.similarity,
         ))
         .color(Color::BLURPLE)
         .image(format!("attachment://{filename}"))

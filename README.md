@@ -140,19 +140,32 @@ the hash pipeline verdict. It exists to collect calibration data first:
   (`ban`/`review`/`clean`). Rows for clean traffic build the negative
   similarity distribution the threshold needs; rows for hash-confirmed bans are
   free positive samples.
-- When the hash pipeline says clean but the similarity exceeds
-  `dino.review_threshold`, a labeling card is posted to the admin channel:
-  **✅ Scam (hash missed it)** / **❌ Not a scam** / **⚠️ Legit but similar**
-  (a hard negative — the valuable ones). Labeling requires the Ban Members
-  permission; the first label wins and is stored with the observation.
-- The similarity scalar is enough to tune the threshold, but dataset growth
-  needs pixels: on label the card image is also saved to
-  `dino.captures_dir/<label>/<observation_id>.<ext>`. True positives are new
-  scam variants — fold them into your image folder and re-run `export` /
-  `dino-export`; hard negatives double as the eval set for future threshold
-  changes. The card also carries the usual **Add to dataset** button (owner
-  only) to close the hash-side gap immediately. Clean traffic is never saved
-  to disk.
+- When the hash pipeline says clean and the review gate trips, a labeling
+  card is posted to the admin channel: **✅ Scam (hash missed it)** /
+  **❌ Not a scam** / **⚠️ Legit but similar**. Labeling requires the Ban
+  Members permission; the first label wins and is stored with the
+  observation.
+- Labels feed the dataset on the spot: a confirmed scam becomes a new **scam
+  reference**, a "legit but similar" becomes a **negative reference** — a
+  known legit look-alike. The review gate is comparative: a card is posted
+  only if the best scam similarity beats the best negative similarity by
+  `dino.negative_margin`, so one labeled false alarm suppresses its whole
+  look-alike class without touching scam recall. Plain "not a scam" labels
+  only calibrate the threshold.
+- Pixels are kept for every label and reference under `dino.captures_dir`
+  (`<group>/<name>.<ext>`) — re-exports after a pipeline bump and threshold
+  eval runs need images, not scalars. Clean traffic is never saved to disk.
+- The card also carries the usual **Add to dataset** button (owner only) to
+  close the hash-side gap immediately.
+
+Manual dataset control from Discord (right-click a message → Apps):
+
+- **DINO: add as scam** / **DINO: add as negative** — add an image to the
+  embedding dataset directly (owner only, shown to administrators).
+  Near-duplicate embeddings and taken names are rejected.
+- **DINO: check image** — ephemeral similarity diagnostics for a message's
+  images: best match, closest negative, and what the review gate would do.
+  Requires Ban Members, touches nothing.
 
 Setup:
 
@@ -161,8 +174,9 @@ Setup:
 curl -L -o dinov2s.onnx \
   https://huggingface.co/Xenova/dinov2-small/resolve/main/onnx/model.onnx
 
-# 2. reference embeddings from your scam image folder (recursive)
-anti-scam dino-export ./images [dino.json]
+# 2. reference embeddings from your scam image folder (recursive);
+#    --negatives seeds known legit look-alikes, e.g. from collected captures
+anti-scam dino-export ./images [dino.json] [--negatives ./dino_captures/hard_negative]
 
 # 3. enable in config.toml
 #    [dino]
@@ -176,11 +190,15 @@ template typically land at 0.7–1.0, the same image at ~1.0; genuinely
 different layouts score lower and should become their own dataset entries,
 same as in the hash pipeline.
 
-Notes: the embedding dataset is bound to its own pipeline version and is
-**not** hot-reloaded — after `dino-export` restart the bot. Entries added from
-Discord land in `banned.json` only; re-run `dino-export` to refresh the
-embedding side. With `dino.enabled` and no dataset file the bot starts with
-shadow mode off (warning in the log); a broken model or dataset fails startup.
+Notes: additions from Discord (labels and context commands) update the
+dataset file and the running bot on the fly; a restart is only needed when
+the file is rebuilt externally with `dino-export` (don't run it while the
+bot is writing the same file). The dataset is bound to its own pipeline
+version — anything that changes how embeddings are computed requires a
+re-export. A missing dataset file starts shadow mode empty (grow it from
+Discord); a broken model or dataset fails startup. The hash dataset
+(`banned.json`) and the embedding dataset are separate — the **Add to
+dataset** button feeds the former, the DINO commands feed the latter.
 
 ## Setup
 
@@ -243,7 +261,9 @@ defaults. The file is read once at startup.
 | `dino.model_path` | `./dinov2s.onnx` | DINOv2-S ONNX encoder |
 | `dino.dataset_path` | `./dino.json` | Embedding dataset built by `dino-export` |
 | `dino.review_threshold` | 0.6 | Min cosine similarity to post a labeling card |
-| `dino.captures_dir` | `./dino_captures` | Where labeled card images are saved |
+| `dino.negative_margin` | 0.05 | Scam similarity must beat the best negative by this much |
+| `dino.intra_threads` | 2 | ONNX Runtime threads per inference |
+| `dino.captures_dir` | `./dino_captures` | Where labeled card and reference images are saved |
 
 These are matching-time thresholds only — tuning them never invalidates an
 existing `banned.json`.

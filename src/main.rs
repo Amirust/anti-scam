@@ -82,7 +82,10 @@ async fn main() {
         commands: vec![
             commands::settings(),
             commands::set_notification_channel(),
-            commands::add_image_to_dataset()
+            commands::add_image_to_dataset(),
+            commands::dino_add_scam(),
+            commands::dino_add_negative(),
+            commands::dino_check(),
         ],
         on_error: |error| Box::pin(on_error(error)),
 
