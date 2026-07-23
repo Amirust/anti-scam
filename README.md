@@ -13,10 +13,13 @@ survive exactly those transformations.
 
 ## What it does
 
-When a message with an image attachment arrives, the bot:
+When a message with an image arrives — a direct attachment, an attachment of
+a forwarded message, or a link whose preview Discord resolves into an embed —
+the bot:
 
 1. Downloads the image (identical images from the same author being processed
-   concurrently are deduplicated in flight).
+   concurrently are deduplicated in flight). Link previews are fetched through
+   the Discord media proxy only, the bot never contacts third-party hosts.
 2. Runs it through the detection pipeline (below) against a dataset of known
    scam images.
 3. Acts on the verdict:
@@ -45,9 +48,14 @@ bytes always differ. Instead:
 to grayscale.
 
 **1. Whole-image perceptual hash.** An 8×8 DCT median pHash of the full image
-is compared against every dataset entry. A Hamming distance of ≤ 10 out of
-64 bits is a hard match. Calibrated on the reference set: re-encoded copies of
-the same image score 0–6, unrelated pairs 18+.
+is compared against every dataset entry. Two cheap evasion tricks are
+compensated with extra trial views of the incoming image: tilted screenshots
+(hashes at rotations within ±12° in 3° steps) and added margins — white
+padding, dark frames, a screenshot-of-a-screenshot (a hash of the image with
+near-uniform borders trimmed away). The minimum distance across all views
+counts. A Hamming distance of ≤ 12 out of 64 bits is a hard match. Calibrated
+on the reference set: re-encoded copies of the same image score 0–6, tilted /
+padded / re-framed copies stay within the threshold, unrelated pairs 18+.
 
 **2. Tile matching.** If the whole image did not match, the bot checks for
 partially redrawn variants. The image is split into a 4×4 grid of 64×64 tiles,
@@ -163,7 +171,7 @@ defaults. The file is read once at startup.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `detection.whole_match_threshold` | 10 | Max Hamming distance (of 64 bits) for a whole-image match |
+| `detection.whole_match_threshold` | 12 | Max Hamming distance (of 64 bits) for a whole-image match |
 | `detection.tile_match_threshold` | 13 | Max Hamming distance for a tile match |
 | `detection.min_informative_tiles` | 6 | Minimum informative tiles for a trusted tile verdict |
 | `detection.hard_match_percent` | 75 | Matched-tile percentage for an auto ban |

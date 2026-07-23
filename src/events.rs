@@ -36,6 +36,9 @@ pub async fn handle_event(
         serenity::FullEvent::Message { new_message } => {
             handle_message(ctx, new_message, data).await
         }
+        serenity::FullEvent::MessageUpdate { new, event, .. } => {
+            handle_message_update(ctx, new.as_ref(), event, data).await
+        }
         serenity::FullEvent::InteractionCreate {
             interaction: serenity::Interaction::Component(component),
         } => {
@@ -50,6 +53,80 @@ pub async fn handle_event(
     }
 }
 
+/// a single image the detector downloads and classifies
+struct ScanTarget {
+    url: String,
+    filename: String,
+}
+
+/// everything scannable in a message: direct attachments, attachments of
+/// forwarded messages (they live in `message_snapshots`) and link-preview
+/// embeds of both
+fn scan_targets(message: &serenity::Message) -> Vec<ScanTarget> {
+    let snapshot_attachments = message
+        .message_snapshots
+        .iter()
+        .flat_map(|snapshot| snapshot.attachments.iter());
+    let snapshot_embeds = message
+        .message_snapshots
+        .iter()
+        .flat_map(|snapshot| snapshot.embeds.iter());
+
+    attachment_targets(message.attachments.iter().chain(snapshot_attachments))
+        .chain(embed_targets(message.embeds.iter().chain(snapshot_embeds)))
+        .collect()
+}
+
+fn attachment_targets<'a>(
+    attachments: impl Iterator<Item = &'a serenity::Attachment> + 'a,
+) -> impl Iterator<Item = ScanTarget> + 'a {
+    attachments
+        .filter(|a| {
+            a.content_type
+                .as_deref()
+                .is_some_and(|ct| ct.starts_with("image/"))
+        })
+        .filter(|a| a.size <= MAX_ATTACHMENT_BYTES)
+        .map(|a| ScanTarget {
+            url: a.url.clone(),
+            filename: a.filename.clone(),
+        })
+}
+
+/// link previews: only the Discord media proxy is downloaded, never the
+/// original third-party URL — the bot must not fetch arbitrary hosts
+fn embed_targets<'a>(
+    embeds: impl Iterator<Item = &'a serenity::Embed> + 'a,
+) -> impl Iterator<Item = ScanTarget> + 'a {
+    embeds.filter_map(|embed| {
+        let proxied = embed
+            .image
+            .as_ref()
+            .and_then(|image| image.proxy_url.as_deref())
+            .or_else(|| {
+                embed
+                    .thumbnail
+                    .as_ref()
+                    .and_then(|thumbnail| thumbnail.proxy_url.as_deref())
+            })?;
+
+        Some(ScanTarget {
+            url: proxied.to_string(),
+            filename: embed_filename(proxied),
+        })
+    })
+}
+
+/// report attachments need an image-looking name for `attachment://` embeds
+fn embed_filename(url: &str) -> String {
+    url.rsplit('/')
+        .next()
+        .and_then(|segment| segment.split('?').next())
+        .filter(|name| name.contains('.'))
+        .map(str::to_string)
+        .unwrap_or_else(|| "embed.png".to_string())
+}
+
 async fn handle_message(
     ctx: &serenity::Context,
     message: &serenity::Message,
@@ -59,39 +136,71 @@ async fn handle_message(
         return Ok(());
     }
 
-    let images: Vec<serenity::Attachment> = message
-        .attachments
-        .iter()
-        .filter(|a| {
-            a.content_type
-                .as_deref()
-                .is_some_and(|ct| ct.starts_with("image/"))
-        })
-        .filter(|a| a.size <= MAX_ATTACHMENT_BYTES)
-        .cloned()
-        .collect();
+    scan_message(ctx, message, data, scan_targets(message)).await
+}
 
-    if images.is_empty() {
+/// link previews resolve after MESSAGE_CREATE: Discord delivers them in a
+/// follow-up MESSAGE_UPDATE, which is the only reliable place to scan them
+async fn handle_message_update(
+    ctx: &serenity::Context,
+    cached: Option<&serenity::Message>,
+    event: &serenity::MessageUpdateEvent,
+    data: &Data,
+) -> Result<(), Error> {
+    let has_embeds = event.embeds.as_ref().is_some_and(|embeds| !embeds.is_empty());
+    if !has_embeds {
+        return Ok(());
+    }
+    if event.author.as_ref().is_some_and(|author| author.bot) {
+        return Ok(());
+    }
+
+    let message = match cached {
+        Some(message) => message.clone(),
+        None => {
+            // REST message objects carry no guild_id, recover it from the event
+            let mut message = ctx.http.get_message(event.channel_id, event.id).await?;
+            message.guild_id = message.guild_id.or(event.guild_id);
+            message
+        }
+    };
+    if message.author.bot {
+        return Ok(());
+    }
+
+    // attachments were already scanned on MESSAGE_CREATE, only embeds are new;
+    // an embed re-delivered by an edit re-classifies harmlessly
+    let targets: Vec<ScanTarget> = embed_targets(message.embeds.iter()).collect();
+    scan_message(ctx, &message, data, targets).await
+}
+
+async fn scan_message(
+    ctx: &serenity::Context,
+    message: &serenity::Message,
+    data: &Data,
+    targets: Vec<ScanTarget>,
+) -> Result<(), Error> {
+    if targets.is_empty() {
         return Ok(());
     }
 
     tracing::info!(
         "processing {} image(s) from message {}",
-        images.len(),
+        targets.len(),
         message.id
     );
 
-    for attachment in images {
+    for target in targets {
         let http = data.http.clone();
         let inflight = Arc::clone(&data.inflight);
         let scam_db = Arc::clone(&data.scam_db);
         let settings_db = Arc::clone(&data.db);
         let ctx = ctx.clone();
         let message = message.clone();
-        let filename = attachment.filename.clone();
+        let filename = target.filename.clone();
 
         tokio::spawn(async move {
-            match process_attachment(attachment, message.author.id, http, inflight, scam_db).await {
+            match process_target(target, message.author.id, http, inflight, scam_db).await {
                 // the guard stays alive until the verdict is fully handled, so
                 // repeated copies of the image stay deduplicated during the ban
                 Ok(Some((verdict, bytes, _guard))) => {
@@ -114,26 +223,36 @@ async fn handle_message(
 
 /// returns `None` when the same image is already being processed by another task;
 /// on success the downloaded bytes and the inflight guard ride along
-async fn process_attachment(
-    attachment: serenity::Attachment,
+async fn process_target(
+    target: ScanTarget,
     author_id: serenity::UserId,
     http: reqwest::Client,
     inflight: InflightSet,
     scam_db: Arc<Dataset>,
 ) -> Result<Option<(Verdict, bytes::Bytes, InflightGuard)>, Error> {
     let bytes = http
-        .get(&attachment.url)
+        .get(&target.url)
         .send()
         .await?
         .error_for_status()?
         .bytes()
         .await?;
 
+    // embeds declare no size upfront, enforce the cap after the download
+    if bytes.len() > MAX_ATTACHMENT_BYTES as usize {
+        tracing::debug!(
+            "image {} is too large ({} bytes), skipping",
+            target.url,
+            bytes.len()
+        );
+        return Ok(None);
+    }
+
     let key = (images_utils::sha256_hash(&bytes), author_id.get());
 
     let is_first = inflight.lock().unwrap().insert(key);
     if !is_first {
-        tracing::debug!("image {} already in flight, skipping", attachment.url);
+        tracing::debug!("image {} already in flight, skipping", target.url);
         return Ok(None);
     }
     let guard = InflightGuard {
