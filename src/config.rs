@@ -28,8 +28,9 @@ pub struct DetectionConfig {
     /// same image; calibrated on ./images: re-encoded copies score 0-6,
     /// unrelated pairs 18+
     pub whole_match_threshold: u32,
-    /// max Hamming distance for two tiles to count as a match;
-    /// aligned re-encoded copies give 0-12 per tile
+    /// max Hamming distance for two tiles to count as a match; aligned
+    /// re-encoded copies mostly score 0-12 per tile (tails reach ~22),
+    /// unrelated tiles sit around 20-40
     pub tile_match_threshold: u32,
     /// tile verdict is only trusted when more informative tiles than this were
     /// compared
