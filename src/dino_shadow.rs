@@ -116,3 +116,60 @@ async fn notification_channel(
         .map(serenity::ChannelId::new);
     Ok(channel)
 }
+
+/// keep the pixels of every labeled card: the similarity scalar is enough to
+/// tune the threshold, but growing the datasets (true positives) and building
+/// an eval set (hard negatives) needs the images themselves — the Discord CDN
+/// copy dies with the card message
+pub async fn capture_labeled_image(
+    http: &reqwest::Client,
+    image_url: &str,
+    observation_id: i64,
+    label: &str,
+) -> Result<std::path::PathBuf, crate::Error> {
+    let bytes = http
+        .get(image_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+
+    let dir = std::path::Path::new(&CONFIG.dino.captures_dir).join(label);
+    std::fs::create_dir_all(&dir)?;
+
+    let path = dir.join(format!("{observation_id}.{}", extension_from_url(image_url)));
+    std::fs::write(&path, &bytes)?;
+    Ok(path)
+}
+
+/// image extension from a CDN url path, query string stripped; the capture
+/// folder is consumed by the recursive `dino-export`, which filters by
+/// extension, so unknown ones fall back to jpg
+fn extension_from_url(url: &str) -> String {
+    url.rsplit('/')
+        .next()
+        .and_then(|segment| segment.split('?').next())
+        .and_then(|name| name.rsplit_once('.').map(|(_, ext)| ext))
+        .filter(|ext| !ext.is_empty() && ext.len() <= 5 && ext.chars().all(char::is_alphanumeric))
+        .map(str::to_lowercase)
+        .unwrap_or_else(|| "jpg".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_from_cdn_url_strips_query() {
+        let url = "https://cdn.discordapp.com/attachments/1/2/scam.PNG?ex=abc&is=def";
+
+        assert_eq!(extension_from_url(url), "png");
+    }
+
+    #[test]
+    fn extension_falls_back_to_jpg() {
+        assert_eq!(extension_from_url("https://cdn.discordapp.com/attachments/1/2/noext"), "jpg");
+        assert_eq!(extension_from_url("https://x.example/a.b/"), "jpg");
+    }
+}

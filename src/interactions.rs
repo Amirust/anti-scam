@@ -102,6 +102,8 @@ pub fn dino_label_buttons(observation_id: i64) -> Vec<CreateActionRow> {
                 .label(label.button_label())
                 .style(label.button_style())
         })
+        // a "hash missed it" scam should land in the hash dataset right away
+        .chain(std::iter::once(add_to_dataset_button()))
         .collect();
 
     vec![CreateActionRow::Buttons(buttons)]
@@ -277,8 +279,10 @@ async fn handle_dino_label_button(
             .label(format!("{} — by {}", label.button_label(), interaction.user.name))
             .style(label.button_style())
             .disabled(true),
+        add_to_dataset_button(),
     ])];
 
+    // respond within the 3s window first, the image download can wait
     interaction
         .create_response(
             &ctx.http,
@@ -287,6 +291,31 @@ async fn handle_dino_label_button(
             ),
         )
         .await?;
+
+    // best-effort: a failed capture must not undo the label
+    match report_image_url(&interaction.message) {
+        Some(url) => {
+            let captured = crate::dino_shadow::capture_labeled_image(
+                &data.http,
+                &url,
+                observation_id,
+                label.as_db_str(),
+            )
+            .await;
+            match captured {
+                Ok(path) => tracing::info!(
+                    "dino observation {observation_id} image captured to {}",
+                    path.display()
+                ),
+                Err(e) => tracing::warn!(
+                    "failed to capture image of dino observation {observation_id}: {e}"
+                ),
+            }
+        }
+        None => tracing::warn!(
+            "dino observation {observation_id} card has no image, nothing captured"
+        ),
+    }
 
     Ok(())
 }

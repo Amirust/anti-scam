@@ -68,6 +68,9 @@ pub struct DinoConfig {
     /// min cosine similarity against the dataset to post a shadow-review
     /// report; uncalibrated until enough labeled observations are collected
     pub review_threshold: f32,
+    /// labeled card images are saved here as `<label>/<observation_id>.<ext>`
+    /// — true positives feed the datasets, hard negatives become the eval set
+    pub captures_dir: String,
 }
 
 impl Default for DinoConfig {
@@ -77,6 +80,7 @@ impl Default for DinoConfig {
             model_path: "./dinov2s.onnx".to_string(),
             dataset_path: "./dino.json".to_string(),
             review_threshold: 0.6,
+            captures_dir: "./dino_captures".to_string(),
         }
     }
 }

@@ -145,6 +145,14 @@ the hash pipeline verdict. It exists to collect calibration data first:
   **✅ Scam (hash missed it)** / **❌ Not a scam** / **⚠️ Legit but similar**
   (a hard negative — the valuable ones). Labeling requires the Ban Members
   permission; the first label wins and is stored with the observation.
+- The similarity scalar is enough to tune the threshold, but dataset growth
+  needs pixels: on label the card image is also saved to
+  `dino.captures_dir/<label>/<observation_id>.<ext>`. True positives are new
+  scam variants — fold them into your image folder and re-run `export` /
+  `dino-export`; hard negatives double as the eval set for future threshold
+  changes. The card also carries the usual **Add to dataset** button (owner
+  only) to close the hash-side gap immediately. Clean traffic is never saved
+  to disk.
 
 Setup:
 
@@ -235,6 +243,7 @@ defaults. The file is read once at startup.
 | `dino.model_path` | `./dinov2s.onnx` | DINOv2-S ONNX encoder |
 | `dino.dataset_path` | `./dino.json` | Embedding dataset built by `dino-export` |
 | `dino.review_threshold` | 0.6 | Min cosine similarity to post a labeling card |
+| `dino.captures_dir` | `./dino_captures` | Where labeled card images are saved |
 
 These are matching-time thresholds only — tuning them never invalidates an
 existing `banned.json`.
