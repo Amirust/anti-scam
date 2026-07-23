@@ -65,7 +65,8 @@ async fn main() {
     let options = poise::FrameworkOptions {
         commands: vec![
             commands::settings(),
-            commands::set_notification_channel()
+            commands::set_notification_channel(),
+            commands::add_image_to_dataset()
         ],
         on_error: |error| Box::pin(on_error(error)),
 

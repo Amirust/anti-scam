@@ -8,7 +8,6 @@ use serenity::all::{
     Timestamp, UserId,
 };
 
-use crate::dataset::AddOutcome;
 use crate::{Data, Error};
 
 const BAN_BUTTON_PREFIX: &str = "ban:";
@@ -241,15 +240,7 @@ pub async fn handle_modal(
     .await;
 
     let feedback = match result {
-        Ok(AddOutcome::Added { name }) => {
-            format!("Added to the dataset as `{name}`. New posts of this image are now auto-banned.")
-        }
-        Ok(AddOutcome::AlreadyMatches { name }) => {
-            format!("Already in the dataset: hard-matches entry `{name}`.")
-        }
-        Ok(AddOutcome::NameTaken { name }) => {
-            format!("The name `{name}` is already used by another entry, pick a different one.")
-        }
+        Ok(outcome) => outcome.describe(),
         Err(e) => {
             tracing::warn!("add to dataset failed: {e}");
             format!("Failed to add the image: {e}")

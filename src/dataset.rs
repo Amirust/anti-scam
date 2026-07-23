@@ -21,6 +21,23 @@ pub enum AddOutcome {
     NameTaken { name: String },
 }
 
+impl AddOutcome {
+    /// user-facing result line for the ephemeral reply
+    pub fn describe(&self) -> String {
+        match self {
+            AddOutcome::Added { name } => format!(
+                "Added to the dataset as `{name}`. New posts of this image are now auto-banned."
+            ),
+            AddOutcome::AlreadyMatches { name } => {
+                format!("Already in the dataset: hard-matches entry `{name}`.")
+            }
+            AddOutcome::NameTaken { name } => {
+                format!("The name `{name}` is already used by another entry, pick a different one.")
+            }
+        }
+    }
+}
+
 enum AddPrep {
     Duplicate(String),
     New(ImageData),

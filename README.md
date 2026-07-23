@@ -32,10 +32,9 @@ When a message with an image attachment arrives, the bot:
      so they keep working across bot restarts.
    - **Clean** — nothing happens.
 
-Every report also carries an **Add to dataset** button (bot owner only): it
-hashes the attached image, appends it to the local `banned.json`, and reloads
-the dataset on the fly — no restart needed. Images that already hard-match an
-existing entry are rejected as duplicates.
+Every report also carries an **Add to dataset** button — one of the ways to
+grow the dataset straight from Discord, see
+[Adding entries from Discord](#adding-entries-from-discord).
 
 ## How detection works
 
@@ -94,6 +93,28 @@ Two ways to get one:
 The dataset is bound to a hashing pipeline version (`pipeline_version`). If
 the hashing algorithm changes, the bot rejects old configs — download a fresh
 one or regenerate with `anti-scam export`.
+
+### Adding entries from Discord
+
+New scam templates show up faster than anyone re-runs `export`, so the dataset
+can be grown without touching the server:
+
+- **From a report** — every ban/review report in the admin channel carries an
+  **Add to dataset** button. It opens a modal asking for an entry name
+  (optional — leave it empty for an auto-generated one).
+- **From any message** — right-click a message → **Apps** → **Add image to
+  dataset**. The modal additionally asks which image to take when the message
+  has several (defaults to the first one).
+- **From the bot's DM** — the context menu command works in direct messages
+  too. Spotted a fresh scam somewhere else? Forward the message (or send the
+  image) to the bot in DM, right-click it, add. Forwarded messages are fully
+  supported.
+
+Both paths are owner-only: the context menu entry is visible to
+administrators, but only the bot owner can execute it. New entries are
+appended to the local `banned.json` and picked up on the fly — no restart
+needed. Images that already hard-match an existing entry are rejected as
+duplicates, and entry names must be unique.
 
 ## Setup
 

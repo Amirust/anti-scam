@@ -13,7 +13,7 @@ use crate::embeds::{
 use crate::utils::bot_can_ban;
 
 /// attachments bigger than this are ignored, real scam screenshots are tiny
-const MAX_ATTACHMENT_BYTES: u32 = 20 * 1024 * 1024;
+pub const MAX_ATTACHMENT_BYTES: u32 = 20 * 1024 * 1024;
 
 struct InflightGuard {
     set: InflightSet,
