@@ -200,6 +200,36 @@ Discord); a broken model or dataset fails startup. The hash dataset
 (`banned.json`) and the embedding dataset are separate — the **Add to
 dataset** button feeds the former, the DINO commands feed the latter.
 
+## HTTP API (experimental)
+
+External services can submit images for a check over HTTP. The caller always
+gets an immediate `200 {"status":"accepted"}` — classification runs in the
+background and the result never reaches the caller. When the DINO stage flags
+the image (primary signal) or the hash pipeline matches it, a report card
+with both signals and the image lands in the configured channel
+(`api.report_guild_id` / `api.report_channel_id`). Nothing is banned or
+deleted. Cards carry the usual DINO labeling buttons, so API submissions feed
+calibration and the reference dataset like any other card.
+
+```sh
+# server side: secret in the environment, endpoint in config.toml ([api])
+export API_JWT_SECRET=<random string, 32+ chars>
+
+# mint a client token (HS256 JWT; same secret as the server)
+anti-scam issue-token my-client 365
+
+# client side: raw image bytes, Bearer auth
+curl -X POST http://127.0.0.1:8080/v1/check \
+  -H "Authorization: Bearer <token>" \
+  --data-binary @image.jpg
+```
+
+Responses: `200` accepted, `401` bad/expired token, `400` empty body, `413`
+over the 20 MB cap, `429` too many submissions in flight (each one costs an
+inference — retry later). The endpoint serves plain HTTP; keep `api.bind` on
+loopback and terminate TLS / do rate limiting in a reverse proxy when
+exposing it.
+
 ## Setup
 
 Requirements: Rust (edition 2024).
@@ -264,6 +294,10 @@ defaults. The file is read once at startup.
 | `dino.negative_margin` | 0.05 | Scam similarity must beat the best negative by this much |
 | `dino.intra_threads` | 2 | ONNX Runtime threads per inference |
 | `dino.captures_dir` | `./dino_captures` | Where labeled card and reference images are saved |
+| `api.enabled` | `false` | HTTP check endpoint ([details](#http-api-experimental)) |
+| `api.bind` | `127.0.0.1:8080` | API bind address |
+| `api.report_guild_id` | — | Guild of the report channel (required when enabled) |
+| `api.report_channel_id` | — | Channel receiving reports for flagged submissions |
 
 These are matching-time thresholds only — tuning them never invalidates an
 existing `banned.json`.
@@ -275,3 +309,4 @@ existing `banned.json`.
 | `DISCORD_TOKEN` | — (required) | Bot token |
 | `BANNED_CONFIG` | `./banned.json` | Path to the banned image dataset |
 | `CONFIG_PATH` | `./config.toml` | Path to the runtime config |
+| `API_JWT_SECRET` | — (required with `api.enabled`) | HS256 secret for API tokens, 32+ chars |

@@ -69,3 +69,21 @@ intra_threads = 2
 # Labeled card images are saved here as <label>/<observation_id>.<ext>.
 # Default: ./dino_captures
 captures_dir = "./dino_captures"
+
+[api]
+# HTTP endpoint (POST /v1/check) for external image checks, authorized by
+# JWT (mint with `anti-scam issue-token`, secret from the API_JWT_SECRET env
+# var). Flagged submissions are reported to the channel below; the caller
+# always gets an immediate 200 and no result.
+# Default: false
+enabled = false
+
+# Bind address. Keep loopback and put a TLS reverse proxy in front when
+# exposing publicly.
+# Default: 127.0.0.1:8080
+bind = "127.0.0.1:8080"
+
+# Where reports for flagged submissions go. Both required when enabled.
+# Default: 0 (unset)
+report_guild_id = 0
+report_channel_id = 0

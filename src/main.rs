@@ -1,3 +1,4 @@
+mod api;
 mod commands;
 mod config;
 mod dataset;
@@ -68,15 +69,23 @@ async fn main() {
         Some("export") => return export::run(&args[2..]),
         Some("dino-export") => return dino_cli::run_export(&args[2..]),
         Some("dino-classify") => return dino_cli::run_classify(&args[2..]),
+        Some("issue-token") => return api::run_issue_token(&args[2..]),
         _ => {}
     }
 
     // fail fast on a broken config.toml instead of on the first image
     config::init();
 
+    let token = var("DISCORD_TOKEN")
+        .expect("Missing `DISCORD_TOKEN` env var, see README for more information.");
+
     let db = Arc::new(db::Database::new().await.expect("failed to open database"));
     let scam_db = Arc::new(dataset::Dataset::load_startup());
     let dino = dino::init_from_config();
+
+    if config::CONFIG.api.enabled {
+        api::start(&token, Arc::clone(&db), Arc::clone(&scam_db), dino.clone()).await;
+    }
 
     let options = poise::FrameworkOptions {
         commands: vec![
@@ -126,9 +135,6 @@ async fn main() {
         })
         .options(options)
         .build();
-
-    let token = var("DISCORD_TOKEN")
-        .expect("Missing `DISCORD_TOKEN` env var, see README for more information.");
 
     let intents =
         serenity::GatewayIntents::non_privileged() |

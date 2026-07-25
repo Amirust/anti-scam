@@ -20,6 +20,7 @@ pub struct AppConfig {
     pub detection: DetectionConfig,
     pub cache: CacheConfig,
     pub dino: DinoConfig,
+    pub api: ApiConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +96,32 @@ impl Default for DinoConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+pub struct ApiConfig {
+    /// HTTP endpoint for external image checks; requires the API_JWT_SECRET
+    /// env var and a report channel below
+    pub enabled: bool,
+    /// bind address; keep loopback and put a TLS reverse proxy in front when
+    /// exposing publicly
+    pub bind: String,
+    /// guild the report channel belongs to; recorded with observations
+    pub report_guild_id: u64,
+    /// channel that receives reports for flagged submissions
+    pub report_channel_id: u64,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: "127.0.0.1:8080".to_string(),
+            report_guild_id: 0,
+            report_channel_id: 0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct CacheConfig {
     /// how many guilds keep their notification channel in memory
     pub guild_settings_capacity: usize,
@@ -157,4 +184,10 @@ fn validate(config: &AppConfig) {
         "dino.negative_margin must be within [0, 1)"
     );
     assert!(config.dino.intra_threads > 0, "dino.intra_threads must be greater than 0");
+    if config.api.enabled {
+        assert!(
+            config.api.report_guild_id != 0 && config.api.report_channel_id != 0,
+            "api.enabled requires api.report_guild_id and api.report_channel_id"
+        );
+    }
 }

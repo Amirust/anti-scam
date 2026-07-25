@@ -7,6 +7,10 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?put DISCORD_TOKEN into .env}
       BANNED_CONFIG: /config/banned.json
       CONFIG_PATH: /config/config.toml
+      # uncomment with api.enabled (and set api.bind to 0.0.0.0:8080)
+      # API_JWT_SECRET: ${API_JWT_SECRET:?put API_JWT_SECRET into .env}
+    # ports:
+    #   - "127.0.0.1:8080:8080"
     volumes:
       - ./config:/config
       # sqlite database (data.db) is here

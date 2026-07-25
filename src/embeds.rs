@@ -114,6 +114,43 @@ pub fn get_dino_shadow_embed(
         .timestamp(Timestamp::now())
 }
 
+// Get embed for a flagged API submission: informational report, no action taken
+pub fn get_api_report_embed(
+    client: &str,
+    shadow_match: Option<&crate::dino_shadow::ShadowMatch>,
+    hash_verdict: &str,
+    filename: &str,
+) -> CreateEmbed {
+    let dino_section = match shadow_match {
+        Some(shadow_match) => {
+            let negative = shadow_match
+                .negative
+                .as_ref()
+                .map(|(name, similarity)| {
+                    format!("\n**Closest negative:** `{name}` at {similarity:.4}")
+                })
+                .unwrap_or_default();
+            format!(
+                "**DINO match:** `{}` at {:.4}{negative}",
+                shadow_match.entry_name, shadow_match.similarity
+            )
+        }
+        None => "**DINO:** disabled".to_string(),
+    };
+
+    CreateEmbed::default()
+        .title("API submission flagged")
+        .description(format!(
+            "Client `{client}` submitted an image over the API.\n\n\
+             {dino_section}\n\
+             **Hash verdict:** {hash_verdict}",
+        ))
+        .color(Color::ORANGE)
+        .image(format!("attachment://{filename}"))
+        .footer(CreateEmbedFooter::new(format!("API client: {client}")))
+        .timestamp(Timestamp::now())
+}
+
 pub fn describe_reason(reason: MatchReason) -> String {
     match reason {
         MatchReason::WholeImage { distance } => {
