@@ -27,6 +27,13 @@ const MAX_IN_FLIGHT: usize = 32;
 const DEFAULT_TOKEN_DAYS: u64 = 365;
 const SECONDS_PER_DAY: u64 = 86_400;
 
+/// the url endpoint downloads only from the Discord CDN — anything else is an
+/// SSRF vector; exact host match, https, default port, redirects disabled
+const ALLOWED_URL_HOSTS: [&str; 2] = ["cdn.discordapp.com", "media.discordapp.net"];
+/// one small JSON must not fan out into unbounded downloads + inferences
+const MAX_URLS_PER_REQUEST: usize = 10;
+const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
     /// client name; shows up in reports and logs
@@ -42,6 +49,9 @@ struct ApiState {
     dino: Option<Arc<DinoRuntime>>,
     decoding_key: DecodingKey,
     limiter: Arc<tokio::sync::Semaphore>,
+    /// no-redirect client for CDN downloads: a redirect off the allowlisted
+    /// host must fail, not be followed
+    downloader: reqwest::Client,
 }
 
 /// bind the listener (fail fast on a bad address) and serve in a background
@@ -60,10 +70,16 @@ pub async fn start(
         dino,
         decoding_key: DecodingKey::from_secret(secret.as_bytes()),
         limiter: Arc::new(tokio::sync::Semaphore::new(MAX_IN_FLIGHT)),
+        downloader: reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(DOWNLOAD_TIMEOUT)
+            .build()
+            .expect("failed to build the api download client"),
     });
 
     let app = Router::new()
         .route("/v1/check", post(check))
+        .route("/v1/check-urls", post(check_urls))
         .layer(DefaultBodyLimit::max(MAX_ATTACHMENT_BYTES as usize))
         .with_state(state);
 
@@ -118,6 +134,128 @@ async fn check(
     });
 
     (StatusCode::OK, Json(json!({ "status": "accepted" })))
+}
+
+#[derive(Deserialize)]
+struct CheckUrlsRequest {
+    urls: Vec<String>,
+}
+
+/// POST /v1/check-urls with `{"urls": [...]}`: Discord CDN links only, each
+/// accepted url is downloaded and classified in the background
+async fn check_urls(
+    State(state): State<Arc<ApiState>>,
+    headers: HeaderMap,
+    Json(request): Json<CheckUrlsRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let client = match authorize(&headers, &state.decoding_key) {
+        Ok(client) => client,
+        Err(reason) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": reason }))),
+    };
+    if request.urls.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "no urls" })));
+    }
+    if request.urls.len() > MAX_URLS_PER_REQUEST {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("too many urls (max {MAX_URLS_PER_REQUEST})") })),
+        );
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    let mut accepted = Vec::new();
+    let mut rejected = Vec::new();
+
+    for raw in request.urls {
+        let url = match validate_discord_url(&raw, now) {
+            Ok(url) => url,
+            Err(reason) => {
+                rejected.push(json!({ "url": raw, "reason": reason }));
+                continue;
+            }
+        };
+        let Ok(permit) = Arc::clone(&state.limiter).try_acquire_owned() else {
+            rejected.push(json!({ "url": raw, "reason": "busy, retry later" }));
+            continue;
+        };
+
+        accepted.push(raw);
+        let state = Arc::clone(&state);
+        let client = client.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            let result = async {
+                let bytes = download_capped(&state.downloader, &url).await?;
+                process_submission(&state, bytes, &client).await
+            }
+            .await;
+            if let Err(e) = result {
+                tracing::warn!(
+                    "api url submission {} from \"{client}\" failed: {e}",
+                    without_query(&url)
+                );
+            }
+        });
+    }
+
+    tracing::info!(
+        "api: {} url(s) accepted, {} rejected from \"{client}\"",
+        accepted.len(),
+        rejected.len()
+    );
+    (StatusCode::OK, Json(json!({ "accepted": accepted, "rejected": rejected })))
+}
+
+fn validate_discord_url(raw: &str, now_unix: u64) -> Result<url::Url, &'static str> {
+    let url = url::Url::parse(raw).map_err(|_| "not a valid url")?;
+    if url.scheme() != "https" {
+        return Err("only https urls are allowed");
+    }
+    let host = url.host_str().ok_or("url has no host")?;
+    if !ALLOWED_URL_HOSTS.contains(&host) {
+        return Err("host not allowed, expected the Discord CDN");
+    }
+    if url.port().is_some() {
+        return Err("custom ports are not allowed");
+    }
+    if is_expired(&url, now_unix) {
+        return Err("discord cdn link already expired");
+    }
+    Ok(url)
+}
+
+/// signed CDN links carry `ex`, their expiry as hex unix seconds; unsigned
+/// links have no `ex` and pass
+fn is_expired(url: &url::Url, now_unix: u64) -> bool {
+    url.query_pairs()
+        .find(|(key, _)| key == "ex")
+        .and_then(|(_, value)| u64::from_str_radix(&value, 16).ok())
+        .is_some_and(|expires_at| expires_at < now_unix)
+}
+
+/// the query string holds the CDN signature, which must not leak into logs
+fn without_query(url: &url::Url) -> String {
+    let mut url = url.clone();
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
+}
+
+async fn download_capped(client: &reqwest::Client, url: &url::Url) -> Result<bytes::Bytes, Error> {
+    let response = client.get(url.clone()).send().await?;
+    // redirects are disabled, so a 3xx surfaces here and must fail closed
+    if !response.status().is_success() {
+        return Err(format!("download failed with http {}", response.status()).into());
+    }
+
+    let bytes = response.bytes().await?;
+    if bytes.len() > MAX_ATTACHMENT_BYTES as usize {
+        return Err(format!("image is too large ({} bytes)", bytes.len()).into());
+    }
+    Ok(bytes)
 }
 
 fn authorize(headers: &HeaderMap, key: &DecodingKey) -> Result<String, &'static str> {
@@ -322,5 +460,47 @@ mod tests {
         let png_magic = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 
         assert_eq!(image_extension(&png_magic), "png");
+    }
+
+    const NOW: u64 = 1_800_000_000;
+
+    #[test]
+    fn url_validation_accepts_cdn_hosts() {
+        assert!(validate_discord_url("https://cdn.discordapp.com/attachments/1/2/a.png", NOW).is_ok());
+        assert!(validate_discord_url("https://media.discordapp.net/attachments/1/2/a.png", NOW).is_ok());
+    }
+
+    #[test]
+    fn url_validation_rejects_foreign_and_lookalike_hosts() {
+        assert!(validate_discord_url("https://evil.com/a.png", NOW).is_err());
+        assert!(validate_discord_url("https://cdn.discordapp.com.evil.com/a.png", NOW).is_err());
+        assert!(validate_discord_url("https://discordapp.com/a.png", NOW).is_err());
+    }
+
+    #[test]
+    fn url_validation_rejects_http_ports_and_garbage() {
+        assert!(validate_discord_url("http://cdn.discordapp.com/a.png", NOW).is_err());
+        assert!(validate_discord_url("https://cdn.discordapp.com:8443/a.png", NOW).is_err());
+        assert!(validate_discord_url("not a url", NOW).is_err());
+    }
+
+    #[test]
+    fn url_validation_checks_the_ex_expiry_param() {
+        let expired = format!("https://cdn.discordapp.com/a.png?ex={:x}&hm=sig", NOW - 60);
+        let fresh = format!("https://cdn.discordapp.com/a.png?ex={:x}&hm=sig", NOW + 3600);
+
+        assert_eq!(
+            validate_discord_url(&expired, NOW).unwrap_err(),
+            "discord cdn link already expired"
+        );
+        assert!(validate_discord_url(&fresh, NOW).is_ok());
+        assert!(validate_discord_url("https://cdn.discordapp.com/a.png", NOW).is_ok());
+    }
+
+    #[test]
+    fn without_query_strips_the_cdn_signature() {
+        let url = url::Url::parse("https://cdn.discordapp.com/a.png?ex=1&is=2&hm=secret").unwrap();
+
+        assert_eq!(without_query(&url), "https://cdn.discordapp.com/a.png");
     }
 }

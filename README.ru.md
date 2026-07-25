@@ -219,7 +219,21 @@ anti-scam issue-token my-client 365
 curl -X POST http://127.0.0.1:8080/v1/check \
   -H "Authorization: Bearer <token>" \
   --data-binary @image.jpg
+
+# или ссылки на Discord CDN — бот скачает сам
+curl -X POST http://127.0.0.1:8080/v1/check-urls \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"urls": ["https://cdn.discordapp.com/attachments/.../scam.png?ex=..."]}'
 ```
+
+`/v1/check-urls` принимает до 10 ссылок за запрос и отвечает по каждой:
+`{"accepted": [...], "rejected": [{"url", "reason"}]}` — результата
+классификации по-прежнему нет. Скачиваются только `cdn.discordapp.com` /
+`media.discordapp.net` по https (точное совпадение хоста, редиректы
+запрещены — всё остальное это SSRF-вектор), ссылки с истёкшей подписью
+`ex` отклоняются на приёме. Скачивание, упавшее после приёма (удалённое
+вложение, таймаут), видно только в логе бота — шлите ссылки свежими, а не
+из архива.
 
 Ответы: `200` принято, `401` плохой/просроченный токен, `400` пустое тело,
 `413` больше лимита в 20 МБ, `429` слишком много заливок в обработке (каждая

@@ -222,7 +222,21 @@ anti-scam issue-token my-client 365
 curl -X POST http://127.0.0.1:8080/v1/check \
   -H "Authorization: Bearer <token>" \
   --data-binary @image.jpg
+
+# or Discord CDN links, the bot downloads them itself
+curl -X POST http://127.0.0.1:8080/v1/check-urls \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"urls": ["https://cdn.discordapp.com/attachments/.../scam.png?ex=..."]}'
 ```
+
+`/v1/check-urls` takes up to 10 links per request and answers with per-url
+intake: `{"accepted": [...], "rejected": [{"url", "reason"}]}` — still no
+classification result. Only `cdn.discordapp.com` / `media.discordapp.net`
+over https are downloaded (exact host match, redirects refused — everything
+else is an SSRF vector), and links whose signed `ex` expiry has passed are
+rejected upfront. A download that fails after intake (deleted attachment,
+timeout) is only visible in the bot log — send links fresh, not from an
+archive.
 
 Responses: `200` accepted, `401` bad/expired token, `400` empty body, `413`
 over the 20 MB cap, `429` too many submissions in flight (each one costs an
