@@ -77,8 +77,6 @@ pub async fn start(
             .expect("failed to build the api download client"),
     });
 
-    verify_report_channel(&state).await;
-
     let app = Router::new()
         .route("/v1/check", post(check))
         .route("/v1/check-urls", post(check_urls))
@@ -96,33 +94,6 @@ pub async fn start(
             tracing::error!("api server stopped: {e}");
         }
     });
-}
-
-/// fail fast on a wrong channel id instead of on the first submission
-async fn verify_report_channel(state: &ApiState) {
-    let channel_id = ChannelId::new(CONFIG.api.report_channel_id);
-    let channel = state.http.get_channel(channel_id).await.unwrap_or_else(|e| {
-        panic!(
-            "api.report_channel_id {channel_id} is not visible to the bot ({e}); \
-             make sure it is the CHANNEL id (not the guild or a message id) and \
-             the bot is a member of that server"
-        )
-    });
-
-    let Some(guild_channel) = channel.guild() else {
-        panic!("api.report_channel_id {channel_id} is not a guild channel");
-    };
-    if guild_channel.guild_id.get() != CONFIG.api.report_guild_id {
-        tracing::warn!(
-            "api.report_channel_id {channel_id} (#{}) belongs to guild {}, but \
-             api.report_guild_id is {} - check for swapped ids",
-            guild_channel.name,
-            guild_channel.guild_id,
-            CONFIG.api.report_guild_id,
-        );
-    } else {
-        tracing::info!("api reports go to #{} ({channel_id})", guild_channel.name);
-    }
 }
 
 fn load_secret() -> String {
