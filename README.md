@@ -129,8 +129,10 @@ The sqlite database (`data.db`) is created and migrated automatically on first
 start.
 
 The bot needs the **Message Content** gateway intent (enable it in the Discord
-developer portal) and the **Ban Members**, **Send Messages** and
-**Embed Links** permissions in the guild.
+developer portal) and the **View Channels**, **Send Messages**, **Embed Links**,
+**Attach Files** and **Ban Members** permissions in the guild. Every report
+re-uploads the scam image as a file, so without **Attach Files** reports fail
+to send.
 
 Then, in each guild, an administrator sets the channel for reports:
 

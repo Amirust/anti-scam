@@ -127,8 +127,9 @@ cargo run --release
 запуске.
 
 Боту нужен gateway-интент **Message Content** (включается в Discord developer
-portal) и права **Ban Members**, **Send Messages** и **Embed Links** в
-гильдии.
+portal) и права **View Channels**, **Send Messages**, **Embed Links**,
+**Attach Files** и **Ban Members** в гильдии. Каждый отчёт заново загружает
+скам-картинку файлом, поэтому без **Attach Files** отчёты не отправятся.
 
 Дальше в каждой гильдии администратор задаёт канал для отчётов:
 
