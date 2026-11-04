@@ -190,3 +190,8 @@ existing `banned.json`.
 | `DISCORD_TOKEN` | — (required) | Bot token |
 | `BANNED_CONFIG` | `./banned.json` | Path to the banned image dataset |
 | `CONFIG_PATH` | `./config.toml` | Path to the runtime config |
+
+## Legal
+
+- [Terms of Service](docs/terms-of-service.md)
+- [Privacy Policy](docs/privacy-policy.md)

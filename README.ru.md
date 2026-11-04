@@ -188,3 +188,8 @@ docker compose up -d --build
 | `DISCORD_TOKEN` | — (обязательна) | Токен бота |
 | `BANNED_CONFIG` | `./banned.json` | Путь к датасету запрещённых картинок |
 | `CONFIG_PATH` | `./config.toml` | Путь к рантайм-конфигу |
+
+## Правовая информация
+
+- [Условия использования](docs/terms-of-service.md) (на английском)
+- [Политика конфиденциальности](docs/privacy-policy.md) (на английском)
