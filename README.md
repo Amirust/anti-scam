@@ -324,3 +324,8 @@ existing `banned.json`.
 | `BANNED_CONFIG` | `./banned.json` | Path to the banned image dataset |
 | `CONFIG_PATH` | `./config.toml` | Path to the runtime config |
 | `API_JWT_SECRET` | — (required with `api.enabled`) | HS256 secret for API tokens, 32+ chars |
+
+## Legal
+
+- [Terms of Service](docs/terms-of-service.md)
+- [Privacy Policy](docs/privacy-policy.md)

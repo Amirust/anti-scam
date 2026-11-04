@@ -321,3 +321,8 @@ docker compose up -d --build
 | `BANNED_CONFIG` | `./banned.json` | Путь к датасету запрещённых картинок |
 | `CONFIG_PATH` | `./config.toml` | Путь к рантайм-конфигу |
 | `API_JWT_SECRET` | — (обязательна при `api.enabled`) | HS256-секрет для API-токенов, 32+ символов |
+
+## Правовая информация
+
+- [Условия использования](docs/terms-of-service.md) (на английском)
+- [Политика конфиденциальности](docs/privacy-policy.md) (на английском)
