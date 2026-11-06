@@ -63,18 +63,18 @@ pub fn get_review_embed(
     user: &User,
     message_url: String,
     entry_name: &str,
-    matched: u32,
-    informative: u32,
+    reason: MatchReason,
     filename: &str,
 ) -> CreateEmbed {
     CreateEmbed::default()
         .title("Suspicious image needs review")
         .description(format!(
             "User <@{}> ({}) posted an image {} that resembles a banned one, \
-             but scored below the auto-ban threshold.\n\n\
+             but the match is too weak for an auto ban.\n\n\
              **Dataset entry:** `{entry_name}`\n\
-             **Match:** {matched}/{informative} informative tiles",
+             **Match:** {}",
             user.id, user.name, message_url,
+            describe_reason(reason)
         ))
         .color(Color::GOLD)
         .image(format!("attachment://{filename}"))

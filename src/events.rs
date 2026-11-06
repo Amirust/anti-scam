@@ -365,9 +365,9 @@ async fn handle_verdict(
             // Send ban report to notification channel
             channel.send_message(&ctx, ban_message).await?;
         }
-        Verdict::Review { entry_name, matched, informative } => {
+        Verdict::Review { entry_name, reason } => {
             tracing::info!(
-                "message {} is flagged for review: {matched}/{informative} tiles matched entry \"{entry_name}\"",
+                "message {} is flagged for review against entry \"{entry_name}\": {reason:?}",
                 message.id
             );
 
@@ -384,8 +384,7 @@ async fn handle_verdict(
                     &message.author,
                     message.link(),
                     &entry_name,
-                    matched,
-                    informative,
+                    reason,
                     filename,
                 ))
                 .components(interactions::review_buttons(
