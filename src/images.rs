@@ -161,14 +161,14 @@ fn bilinear_sample(pixels: &[u8], x: f32, y: f32) -> u8 {
     (top * (1.0 - fy) + bottom * fy).round() as u8
 }
 
-/// whole-image hashes of the image under every trial rotation (includes 0°);
-/// stage 1 takes the minimum distance per entry, so a tilted repost of a scam
-/// template still lands within the whole-match threshold
-pub fn rotated_whole_hashes(normalized: &[u8]) -> Result<Vec<[u8; HASH_BYTES]>, Error> {
+/// the image under every trial rotation (includes 0°); stage 1 takes the
+/// minimum hash distance per entry, so a tilted repost of a scam template still
+/// lands within the whole-match threshold
+fn rotated_views(normalized: &[u8]) -> Vec<Vec<u8>> {
     trial_rotations()
         .collect::<Vec<_>>()
         .into_par_iter()
-        .map(|deg| whole_image_hash(&rotate_image(normalized, deg as f32)))
+        .map(|deg| rotate_image(normalized, deg as f32))
         .collect()
 }
 
@@ -218,16 +218,23 @@ pub fn trimmed_view(normalized: &[u8]) -> Option<Vec<u8>> {
     Some(resized.into_raw())
 }
 
-/// every whole-image hash view stage 1 tries: the image itself and (when
-/// uniform padding was detected) its border-trimmed version, each under all
-/// trial rotations; the matcher takes the minimum distance per entry
-pub fn stage1_hashes(normalized: &[u8]) -> Result<Vec<[u8; HASH_BYTES]>, Error> {
-    let mut hashes = rotated_whole_hashes(normalized)?;
+/// every whole-image view stage 1 tries: the image itself and (when uniform
+/// padding was detected) its border-trimmed version, each under all trial
+/// rotations; kept as pixels so a hit can be re-checked with tiles on the very
+/// view that matched
+pub fn stage1_views(normalized: &[u8]) -> Vec<Vec<u8>> {
+    let mut views = rotated_views(normalized);
     if let Some(trimmed) = trimmed_view(normalized) {
-        hashes.extend(rotated_whole_hashes(&trimmed)?);
+        views.extend(rotated_views(&trimmed));
     }
 
-    Ok(hashes)
+    views
+}
+
+/// whole-image hashes of the stage 1 views; the matcher takes the minimum
+/// distance per entry
+pub fn stage1_hashes(views: &[Vec<u8>]) -> Result<Vec<[u8; HASH_BYTES]>, Error> {
+    views.par_iter().map(|view| whole_image_hash(view)).collect()
 }
 
 fn trial_rotations() -> impl Iterator<Item = i32> {

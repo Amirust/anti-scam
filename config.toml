@@ -8,6 +8,20 @@
 # Default: 12
 whole_match_threshold = 12
 
+# A whole-image match this close bans on its own. A looser one (up to whole_match_threshold)
+# bans only when tiles confirm it (see whole_confirm_tiles), otherwise it goes to manual review:
+# smooth unrelated pictures (faces, skin, gradients) and other screenshots of the same page
+# template reach 8-12 across the trial views, re-encoded copies score 0-2.
+# Must not exceed whole_match_threshold.
+# Default: 4
+whole_strong_threshold = 4
+
+# How many tiles must match (on the image itself or on the rotated/trimmed view that matched)
+# to confirm a whole-image match looser than whole_strong_threshold. Unrelated pairs match 0-2.
+# 0 turns confirmation off: every whole-image match within whole_match_threshold bans.
+# Default: 3
+whole_confirm_tiles = 3
+
 # Max Hamming distance for two tiles to count as a match.
 # Measured on the reference set: after shift alignment most tiles of re-encoded
 # copies score 0-12 (tails reach ~22), unrelated tiles sit around 20-40 with

@@ -28,6 +28,15 @@ pub struct DetectionConfig {
     /// same image; calibrated on ./images: re-encoded/distorted copies score
     /// 0-12 across the stage-1 trial views, unrelated pairs 18+
     pub whole_match_threshold: u32,
+    /// a whole-image match this close bans on its own; a looser one (up to
+    /// whole_match_threshold) bans only when tiles confirm it, otherwise it
+    /// goes to review. re-encoded copies score 0-2, while smooth unrelated
+    /// pictures and other screenshots of the same template reach 8-12
+    pub whole_strong_threshold: u32,
+    /// matched tiles (on the image or on the view that matched) that confirm a
+    /// whole-image match looser than whole_strong_threshold; unrelated pairs
+    /// match 0-2 tiles. 0 makes every whole-image match a ban
+    pub whole_confirm_tiles: u32,
     /// max Hamming distance for two tiles to count as a match; aligned
     /// re-encoded copies mostly score 0-12 per tile (tails reach ~22),
     /// unrelated tiles sit around 20-40
@@ -45,6 +54,8 @@ impl Default for DetectionConfig {
     fn default() -> Self {
         Self {
             whole_match_threshold: 12,
+            whole_strong_threshold: 4,
+            whole_confirm_tiles: 3,
             tile_match_threshold: 13,
             min_informative_tiles: 6,
             hard_match_percent: 75,
@@ -102,6 +113,15 @@ fn validate(config: &AppConfig) {
     assert!(
         detection.hard_match_percent <= 100 && detection.review_percent <= 100,
         "detection percentages must be within 0-100"
+    );
+    assert!(
+        detection.whole_strong_threshold <= detection.whole_match_threshold,
+        "detection.whole_strong_threshold must not exceed detection.whole_match_threshold"
+    );
+    assert!(
+        detection.whole_confirm_tiles as usize <= crate::images::TILE_COUNT,
+        "detection.whole_confirm_tiles cannot exceed the {} tiles of an image",
+        crate::images::TILE_COUNT
     );
     assert!(
         detection.review_percent <= detection.hard_match_percent,

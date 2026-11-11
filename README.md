@@ -53,11 +53,19 @@ compensated with extra trial views of the incoming image: tilted screenshots
 (hashes at rotations within ±12° in 3° steps) and added margins — white
 padding, dark frames, a screenshot-of-a-screenshot (a hash of the image with
 near-uniform borders trimmed away). The minimum distance across all views
-counts. A Hamming distance of ≤ 12 out of 64 bits is a hard match. Calibrated
-on the reference set: re-encoded copies of the same image score 0–6, tilted /
+counts. A Hamming distance of ≤ 12 out of 64 bits is a match. Calibrated on
+the reference set: re-encoded copies of the same image score 0–6, tilted /
 padded / re-framed copies stay within the threshold, unrelated pairs 18+.
 
-**2. Tile matching.** If the whole image did not match, the bot checks for
+A 64-bit hash only captures the coarse brightness layout, and 18 views give an
+unrelated image 18 chances to land in the threshold: smooth, low-contrast
+pictures (faces, skin, gradients) and different screenshots of one page
+template reach 8–12. So a match bans on its own only when it is near-exact
+(≤ 4). A looser one bans when at least 3 tiles (see below) agree with the
+entry, on the image itself or on the rotated / trimmed view that matched;
+otherwise it goes to **Review** instead of a ban.
+
+**2. Tile matching.** If the whole image did not ban, the bot checks for
 partially redrawn variants. The image is split into a 4×4 grid of 64×64 tiles,
 each hashed separately. Tile hashes break from as little as a 2 px shift while
 re-encoded copies drift by ~5 px, so the incoming image is first tried at every
@@ -174,6 +182,8 @@ defaults. The file is read once at startup.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `detection.whole_match_threshold` | 12 | Max Hamming distance (of 64 bits) for a whole-image match |
+| `detection.whole_strong_threshold` | 4 | Whole-image distance that bans without tile confirmation |
+| `detection.whole_confirm_tiles` | 3 | Matched tiles that confirm a looser whole-image match (0 = no confirmation) |
 | `detection.tile_match_threshold` | 13 | Max Hamming distance for a tile match |
 | `detection.min_informative_tiles` | 6 | Minimum informative tiles for a trusted tile verdict |
 | `detection.hard_match_percent` | 75 | Matched-tile percentage for an auto ban |
